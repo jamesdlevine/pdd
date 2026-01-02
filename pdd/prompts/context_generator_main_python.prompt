@@ -1,0 +1,53 @@
+% You are an expert Python engineer. Write a CLI wrapper function `context_generator_main` that generates example code from a prompt and code file. It uses `construct_paths` for path resolution and `context_generator` for local generation.
+
+<context.python_preamble><include>context/python_preamble.prompt</include></context.python_preamble>
+<context.ctx_obj_params><include>context/ctx_obj_params.prompt</include></context.ctx_obj_params>
+
+% Inputs/Outputs
+  Inputs:
+    - `ctx` (`click.Context`): Click context (see ctx_obj_params for available keys). Note: `time` has no default here.
+    - `prompt_file` (str): Path to the prompt file.
+    - `code_file` (str): Path to the code file.
+    - `output` (Optional[str]): Output path. If None, uses default naming.
+  Outputs:
+    - Tuple[str, float, str]: (generated_code, total_cost, model_name)
+
+% Requirements
+  1. Use `construct_paths` with `command="example"` and `context_override=ctx.obj.get('context')`.
+  2. Compute absolute paths for `source_file_path`, `example_file_path`, and `module_name` to pass to `context_generator`.
+  3. Output path resolution: use explicit `output` unless it ends with "/" or is an existing directory.
+  4. For Python: validate syntax with `ast.parse`; attempt auto-fix of JSON metadata garbage appended by LLMs.
+  5. Raise `click.UsageError("Example generation failed, no code produced.")` if generation returns empty.
+  6. Print success/failure status, model name, and cost (formatted `${cost:.6f}`) when not quiet.
+  7. On exception: print error (respecting quiet) and re-raise.
+
+% Cloud vs Local Execution
+  1. If `ctx.obj.get("local")` is True, use local execution directly.
+  2. Otherwise, attempt cloud first:
+     - CRITICAL: Obtain JWT token via `CloudConfig.get_jwt_token(verbose=verbose)` BEFORE `asyncio.run()` to avoid nested event loops.
+     - Fall back to local if token acquisition fails.
+     - Preprocess prompt with `preprocess(prompt_text, recursive=True, double_curly_brackets=False)`.
+     - Cloud endpoint: `CloudConfig.get_endpoint_url("generateExample")`.
+     - Payload: `{ "promptContent", "codeContent", "language", "strength", "temperature", "verbose" }`.
+     - Response fields: `generatedExample`, `totalCost`, `modelName`.
+     - Timeout: 400 seconds.
+  3. HTTP error handling: 401/402/403 raise `UsageError`; others fall back to local.
+
+<examples>
+  <construct_paths_example>
+    <context.construct_paths><include>context/construct_paths_example.py</include></context.construct_paths>
+  </construct_paths_example>
+  <context_generator_example>
+    <context.context_generator><include>context/context_generator_example.py</include></context.context_generator>
+  </context_generator_example>
+  <code_generator_main_example>
+    <context.generate.7.code_generator_main><include>context/generate/7/code_generator_main.py</include></context.generate.7.code_generator_main>
+  </code_generator_main_example>
+  <cloud_api_documentation>
+    <docs.api_documentation><include>../docs/api-documentation.md</include></docs.api_documentation>
+  </cloud_api_documentation>
+</examples>
+
+<cli_readme>
+  <context.change.15.README><include>context/change/15/README.md</include></context.change.15.README>
+</cli_readme>

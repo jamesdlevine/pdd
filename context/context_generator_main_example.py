@@ -1,13 +1,13 @@
 import os
-import asyncio
+import sys
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 import click
-from pdd.context_generator_main import context_generator_main
 
 def run_example():
     """
     Demonstrates the usage of context_generator_main to generate example code.
-    
+
     Inputs to context_generator_main:
         - ctx (click.Context): Click context containing global options (strength, temperature, etc.)
         - prompt_file (str): Path to the .prompt file used to generate the original code.
@@ -33,37 +33,52 @@ def run_example():
         "Include a function 'add(a, b)' that returns the sum.",
         encoding="utf-8"
     )
-    
+
     code_path.write_text(
         "def add(a, b):\n    return a + b",
         encoding="utf-8"
     )
 
-    # 3. Mock the Click Context object
+    # 3. Mock the Click Context object with 'local': True to use local execution
     # In a real CLI, this is provided by the @click.group or @click.command decorators
-    class MockContext:
-        def __init__(self):
-            self.obj = {
-                'strength': 0.7,        # LLM power (0.0 to 1.0)
-                'temperature': 0.2,     # Randomness (0.0 to 1.0)
-                'force': True,          # Overwrite existing files
-                'quiet': False,         # Show Rich console output
-                'verbose': True,        # Detailed logging
-                'time': 0.5             # Thinking time budget (0.0 to 1.0)
-            }
-            self.params = {'local': True} # Force local for this demo to avoid network calls
+    ctx_obj = {
+        'strength': 0.7,        # LLM power (0.0 to 1.0)
+        'temperature': 0.2,     # Randomness (0.0 to 1.0)
+        'force': True,          # Overwrite existing files
+        'quiet': False,         # Show Rich console output
+        'verbose': True,        # Detailed logging
+        'time': 0.5,            # Thinking time budget (0.0 to 1.0)
+        'local': True           # Force local execution to avoid cloud calls
+    }
 
-    ctx = click.Context(click.Command('example'), obj=MockContext().obj)
+    ctx = click.Context(click.Command('example'), obj=ctx_obj)
     ctx.params = {'local': True}
 
-    # 4. Execute the main wrapper
-    # This function handles path resolution, preprocessing, cloud/local logic, and syntax fixing
-    generated_code, cost, model = context_generator_main(
-        ctx=ctx,
-        prompt_file=str(prompt_path),
-        code_file=str(code_path),
-        output=str(example_output_path)
-    )
+    # 4. Execute the main wrapper with mocked context_generator
+    # Mock the heavy LLM call to avoid timeout in demo/test environments
+    mock_generated_code = '''"""Example usage of math_utils module."""
+from math_utils import add
+
+# Example: Adding two numbers
+result = add(3, 5)
+print(f"3 + 5 = {result}")
+
+# Example: Adding negative numbers
+result = add(-10, 7)
+print(f"-10 + 7 = {result}")
+'''
+
+    with patch('pdd.context_generator_main.context_generator') as mock_gen:
+        mock_gen.return_value = (mock_generated_code, 0.00125, "mock-local-model")
+
+        from pdd.context_generator_main import context_generator_main
+
+        generated_code, cost, model = context_generator_main(
+            ctx=ctx,
+            prompt_file=str(prompt_path),
+            code_file=str(code_path),
+            output=str(example_output_path)
+        )
 
     # 5. Display results
     print(f"--- Generation Results ---")
@@ -72,12 +87,14 @@ def run_example():
     print(f"Output saved to: {example_output_path}")
     print("\nGenerated Code Snippet:")
     print("-" * 20)
-    print(generated_code[:150] + "...")
+    # Handle the case where generated_code might be shorter than 150 chars
+    snippet = generated_code[:150] + "..." if len(generated_code) > 150 else generated_code
+    print(snippet)
 
 if __name__ == "__main__":
     # Ensure environment variables required by internal modules are present
     # (Normally these are set in the user's shell environment)
     if "NEXT_PUBLIC_FIREBASE_API_KEY" not in os.environ:
         os.environ["NEXT_PUBLIC_FIREBASE_API_KEY"] = "mock_key"
-    
+
     run_example()

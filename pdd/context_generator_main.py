@@ -84,19 +84,18 @@ async def _run_cloud_generation(prompt_content: str, code_content: str, language
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     payload = {"promptContent": processed_prompt, "codeContent": code_content, "language": language, "strength": strength, "temperature": temperature, "verbose": verbose}
     async with httpx.AsyncClient(timeout=CLOUD_TIMEOUT_SECONDS) as client:
-        try:
-            cloud_url = CloudConfig.get_endpoint_url("generateExample")
-            response = await client.post(cloud_url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            generated_code = data.get("generatedExample", "")
-            total_cost = float(data.get("totalCost", 0.0))
-            model_name = data.get("modelName", "cloud-model")
-            if not generated_code:
-                return None, 0.0, "Cloud function returned empty code."
-            return generated_code, total_cost, model_name
-        except Exception as e:
-            return None, 0.0, f"Cloud error: {e}"
+        # Exceptions from httpx (TimeoutException, HTTPStatusError, etc.) are allowed to propagate
+        # so they can be handled specifically by the caller (context_generator_main).
+        cloud_url = CloudConfig.get_endpoint_url("generateExample")
+        response = await client.post(cloud_url, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        generated_code = data.get("generatedExample", "")
+        total_cost = float(data.get("totalCost", 0.0))
+        model_name = data.get("modelName", "cloud-model")
+        if not generated_code:
+            return None, 0.0, "Cloud function returned empty code."
+        return generated_code, total_cost, model_name
 
 def context_generator_main(ctx: click.Context, prompt_file: str, code_file: str, output: Optional[str]) -> Tuple[str, float, str]:
     try:
