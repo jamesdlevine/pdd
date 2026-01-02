@@ -18,6 +18,16 @@ def valid_inputs():
 def mock_console():
     return Console()
 
+
+@pytest.fixture(autouse=True)
+def mock_llm_backend(monkeypatch):
+    """Mock the LLM backend to prevent real API calls and speed up tests."""
+    def _mock_gen(*args, **kwargs):
+        return ("def test_mock(): pass", 0.001, "mock-model")
+
+    monkeypatch.setattr("pdd.generate_test.generate_test_LLM", _mock_gen, raising=False)
+    monkeypatch.setattr("pdd.generate_test.continue_generation", _mock_gen, raising=False)
+
 # Test successful generation
 def test_generate_test_successful(valid_inputs):
     result = generate_test(**valid_inputs)
@@ -89,11 +99,8 @@ def test_generate_test_maximum_values(valid_inputs):
     assert len(result) == 3
 
 # Test different languages
-def test_generate_test_different_languages(monkeypatch):
-    # Avoid dependence on structured output in continuation by stubbing continue_generation
-    def _stub_continue(formatted_input_prompt, llm_output, strength, temperature, time=0.25, language=None, verbose=False):
-        return (llm_output, 0.0, "stub-model")
-    monkeypatch.setattr("pdd.generate_test.continue_generation", _stub_continue)
+def test_generate_test_different_languages():
+    # The autouse mock_llm_backend fixture handles mocking
     languages = ['python', 'javascript', 'java', 'cpp']
     for lang in languages:
         result = generate_test(
