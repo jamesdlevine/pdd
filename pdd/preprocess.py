@@ -120,7 +120,12 @@ def preprocess(prompt: str, recursive: bool = False, double_curly_brackets: bool
 
 def get_file_path(file_name: str) -> str:
     # First try CWD (for user project files)
-    cwd_path = os.path.join('./', file_name)
+    # Avoid creating paths like ././subdir/file.txt if file_name already starts with ./
+    if file_name.startswith("./") or os.path.isabs(file_name):
+        cwd_path = file_name
+    else:
+        cwd_path = os.path.join('./', file_name)
+        
     if os.path.exists(cwd_path):
         return cwd_path
 

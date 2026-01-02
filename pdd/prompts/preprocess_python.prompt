@@ -1,0 +1,57 @@
+% You are an expert Python engineer. Write a 'preprocess' function that preprocesses prompts for LLMs by resolving XML-like tags and optionally escaping curly braces.
+
+% Function Signature
+    def preprocess(prompt: str, recursive: bool = False, double_curly_brackets: bool = True, exclude_keys: Optional[List[str]] = None) -> str
+
+% Inputs/Outputs
+    - prompt: The prompt string to preprocess
+    - recursive: When True, resolve includes but defer <shell> and <web> execution (for later variable expansion)
+    - double_curly_brackets: When True, escape single curly braces as double braces (for PromptTemplate compatibility)
+    - exclude_keys: Variable names to exclude from brace doubling
+    - Returns: The preprocessed prompt (preserve leading/trailing whitespace)
+
+% Processing Order
+    Process tags in order: pdd → include/include-many → shell → web. Apply curly-brace doubling last (only to top-level prompt).
+
+% Tag Behaviors
+    <pdd>...</pdd> - Human-only comment; delete entire block including tags
+    <include>path</include> - Replace with file contents. For images (.png, .jpg, .jpeg, .gif, .webp, .heic): resize to max 1024px, convert GIF→PNG (first frame), HEIC→JPEG, return as base64 data URL
+    <include-many>paths</include-many> - Comma/newline-separated paths; concatenate contents with newlines
+    <shell>cmd</shell> - Execute command, replace with stdout. On error, insert bracketed error message
+    <web>url</web> - Fetch via Firecrawl (requires FIRECRAWL_API_KEY), replace with markdown content
+
+    Backtick includes: ```<path>``` → ```{file contents}```
+    Use pattern r"```<([^>]*?)>```" to avoid matching XML content spanning multiple lines
+
+% Recursive Pass Behavior
+    When recursive=True:
+    - Resolve includes recursively (preprocess included content with recursive=True, double_curly_brackets=False)
+    - Defer shell and web execution (leave tags intact)
+    - On missing file, leave tag unchanged for later variable expansion
+    When recursive=False:
+    - Execute shell/web tags
+    - On missing file, insert [File not found: path]
+
+% Curly Brace Handling (when double_curly_brackets=True)
+    - Double single braces: {var} → {{var}}
+    - Preserve already-doubled: {{var}} stays {{var}}
+    - Skip excluded keys: {key} in exclude_keys stays {key}
+    - Handle ${IDENT} placeholders: convert to ${{IDENT}} to prevent PromptTemplate errors
+    - Process code blocks (json, js, ts, python, py) with idempotence
+    - Handle nested braces: {outer{inner}} → {{outer{{inner}}}}
+    - Handle multiline braces correctly
+
+% File Path Resolution
+    Implement get_file_path(file_name) that:
+    1. First tries CWD: ./file_name (avoid ././ duplication if path starts with ./)
+    2. Falls back to package directory if not found in CWD
+    3. Returns CWD path as default (for consistent error behavior)
+
+% Debug Mode
+    Support PDD_PREPROCESS_DEBUG env var to enable console logging
+    Support PDD_PREPROCESS_DEBUG_FILE env var to write debug report to file
+
+% Firecrawl Usage
+<firecrawl_example>
+    <include>./context/firecrawl_example.py</include>
+</firecrawl_example>
