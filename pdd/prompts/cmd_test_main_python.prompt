@@ -1,0 +1,74 @@
+% You are an expert Python engineer. Your goal is to write a Python function, 'cmd_test_main', that will be the CLI wrapper for generating or enhancing unit tests. This function will read a prompt file and a code file, generate unit tests using `generate_test`, or enhance existing tests using `increase_tests` when a coverage report is provided, and handle the output location and language detection via `construct_paths`.
+
+<include>./context/python_preamble.prompt</include>
+
+% Inputs/Outputs:
+    Inputs:
+        - `ctx` (`click.Context`): The Click context object with `obj` dict containing: verbose, quiet, force, local, time, context, confirm_callback.
+        - `prompt_file` (str): Path to the prompt file that generated the code.
+        - `code_file` (str): Path to the code file to be tested.
+        - `output` (str | None): Path for generated test file. If None, use resolved path from `construct_paths`.
+        - `language` (str | None): Programming language. If None, deduce via `construct_paths`.
+        - `coverage_report` (str | None): Path to coverage report. When provided, 'existing_tests' is required and `increase_tests` is used.
+        - `existing_tests` (list[str] | None): Paths to existing test files. Required when using 'coverage_report'. All files are read and concatenated with "\n".
+        - `target_coverage` (float | None): Desired coverage. Accepted but not used.
+        - `merge` (bool | None): If True and 'existing_tests' provided, write output to first 'existing_tests' path in append mode.
+        - `strength` (float | None): Overrides 'strength' from `ctx.obj` if provided.
+        - `temperature` (float | None): Overrides 'temperature' from `ctx.obj` if provided.
+    Outputs:
+        - Returns tuple (`str`, `float`, `str`): generated test code, total cost, model name.
+        - On error, returns `("", 0.0, f"Error: {exception}")`.
+
+% Requirements:
+    1. Use `construct_paths` to build paths and determine language, passing `context_override=ctx.obj.get('context')` and `confirm_callback=ctx.obj.get('confirm_callback')`.
+    2. Use `resolve_effective_config(ctx, resolved_config, param_overrides={...})` after `construct_paths` to resolve strength, temperature, and time.
+    3. If 'coverage_report' is provided without 'existing_tests', print Rich error and return error tuple.
+    4. Read multiple existing test files and concatenate into `input_strings["existing_tests"]`.
+    5. Validate generated content is non-empty after stripping; on empty, print diagnostics and return error tuple.
+    6. Create parent directories for output file. Use UTF-8 encoding.
+    7. In merge mode, append to first 'existing_tests' path with "\n\n" prefix.
+    8. Re-raise `click.Abort` exceptions; catch other exceptions and return error tuple.
+    9. Pass `existing_tests` content to `generate_test` even in basic generation mode (no coverage report).
+
+% Cloud vs Local Execution Strategy:
+    1. If `ctx.obj.get('local')` is True, use local execution directly (unless PDD_CLOUD_ONLY or PDD_NO_LOCAL_FALLBACK env vars are set).
+    2. Otherwise, attempt cloud execution first:
+       - Obtain JWT via `CloudConfig.get_jwt_token()`.
+       - Use 400 second timeout.
+       - POST to `generateTest` endpoint with payload: promptContent, codeContent, language, strength, temperature, time, verbose, sourceFilePath, testFilePath, moduleName, mode ("generate" or "increase").
+       - For increase mode, add existingTests and coverageReport fields.
+       - Expected response: generatedTest, totalCost, modelName.
+    3. Non-recoverable HTTP errors (raise UsageError, do NOT fall back):
+       - 402: Insufficient credits (display balance and estimated cost)
+       - 401: Authentication failed
+       - 403: Access denied
+       - 400: Invalid request
+    4. Recoverable errors (fall back to local unless cloud-only mode):
+       - 5xx server errors
+       - Network/timeout errors
+       - Empty response or invalid JSON
+    5. If verbose, print Rich panels showing execution mode and results.
+
+<examples>
+   <internal_example_modules>
+      <construct_paths_example>
+      <include>context/construct_paths_example.py</include>
+      </construct_paths_example>
+
+      <generate_test_example>
+      <include>context/generate_test_example.py</include>
+      </generate_test_example>
+
+      <increase_tests_example>
+      <include>context/increase_tests_example.py</include>
+      </increase_tests_example>
+
+      <get_jwt_token_example>
+      <include>context/get_jwt_token_example.py</include>
+      </get_jwt_token_example>
+
+      <cloud_config_example>
+      <include>context/core/cloud_example.py</include>
+      </cloud_config_example>
+   </internal_example_modules>
+</examples>
