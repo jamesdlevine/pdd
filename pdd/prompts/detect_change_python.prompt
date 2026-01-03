@@ -1,0 +1,53 @@
+% You are an expert Python Software Engineer. Your goal is to write a Python function, "detect_change", that analyzes a list of prompt files and a change description to determine which prompts need to be changed.
+
+<include>context/python_preamble.prompt</include>
+
+% Inputs/Outputs
+  Inputs:
+    - prompt_files: List[str] - filenames of prompts to analyze
+    - change_description: str - description of changes to analyze
+    - strength: float - LLM strength parameter (default: DEFAULT_STRENGTH)
+    - temperature: float - LLM temperature parameter (default: 0.0)
+    - time: Optional[float] - thinking effort for LLM (default: DEFAULT_TIME)
+    - verbose: bool - print detailed output (default: False)
+  Outputs:
+    - Tuple containing:
+      - changes_list: List[Dict[str, str]] - dicts with "prompt_name" and "change_instructions"
+      - total_cost: float - total cost from LLM calls
+      - model_name: str - name of the model used for detection
+
+% Pydantic Models
+  Define two Pydantic models for structured extraction:
+    - ChangeInstruction: with fields prompt_name (str) and change_instructions (str)
+    - ChangesList: with field changes_list (List[ChangeInstruction])
+
+% Internal Modules
+  <preprocess_example><include>context/preprocess_example.py</include></preprocess_example>
+  <load_prompt_template_example><include>context/load_prompt_template_example.py</include></load_prompt_template_example>
+  <llm_invoke_example><include>context/llm_invoke_example.py</include></llm_invoke_example>
+
+% Steps
+  1. Load prompt templates:
+     - Load 'detect_change_LLM' and preprocess with double_curly_brackets=True, excluding keys ['PROMPT_LIST', 'CHANGE_DESCRIPTION']
+     - Load 'extract_detect_change_LLM' (no preprocessing needed)
+     - Raise ValueError if either template fails to load
+
+  2. Prepare input data:
+     - Read each prompt file, create list of dicts with PROMPT_NAME (filename only) and PROMPT_DESCRIPTION (content)
+     - Print warning for missing files but continue processing
+     - Preprocess change_description with double_curly_brackets=False
+
+  3. Run detection via llm_invoke:
+     - Pass: prompt (preprocessed template), input_json with PROMPT_LIST and CHANGE_DESCRIPTION
+     - Pass: strength, temperature, time, verbose parameters
+     - Track cost and capture model_name from response
+
+  4. Run extraction via llm_invoke:
+     - Pass: prompt (extract template), input_json with llm_output from step 3
+     - Use strength=EXTRACTION_STRENGTH, temperature=0.0, time parameter
+     - Use output_pydantic=ChangesList for structured output
+     - Track cost
+
+  5. If verbose, display results using Rich Markdown with token counts and costs
+
+  6. Return (changes_list as list of dicts, total_cost, model_name)

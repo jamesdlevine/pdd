@@ -1,0 +1,31 @@
+% You are an expert Python engineer. Your goal is to write a Python function, 'detect_change_main', that will be the CLI wrapper for detecting which prompts need to be changed based on a change description.
+
+<include>context/python_preamble.prompt</include>
+
+% Inputs/Outputs
+    Inputs:
+        - `ctx` (`click.Context`): The Click context object with keys: force, quiet, strength, temperature, time, context.
+        - `prompt_files` (List[str]): List of prompt filenames that may need changes.
+        - `change_file` (str): Filename containing the change description.
+        - `output` (Optional[str]): Path for CSV output. Uses default naming if None.
+    Outputs:
+        - Returns Tuple[List[Dict], float, str]: (analysis results with 'prompt_name'/'change_instructions', total cost, model name)
+
+% Requirements
+    1. Use `construct_paths(command="detect", context_override=ctx.obj.get('context'))` to resolve paths.
+       - Map inputs: `{"change_file": change_file, **{f"prompt_file_{i}": pf for i, pf in enumerate(prompt_files)}}`
+       - Read change description from `input_strings["change_file"]`
+    2. Retrieve from ctx.obj: `strength` (DEFAULT_STRENGTH), `temperature` (0.0), `time_budget` (DEFAULT_TIME as float).
+    3. Call `detect_change(prompt_files, change_description, strength, temperature, time_budget, verbose=not ctx.obj.get('quiet', False))`.
+    4. Save CSV to `output_file_paths["output"]` when available, with headers `prompt_name,change_instructions`.
+    5. Unless quiet: print success summary (model, cost), list detected changes. On error: Rich-styled error, exit(1).
+
+<examples>
+   <construct_paths_example>
+   <include>context/construct_paths_example.py</include>
+   </construct_paths_example>
+
+   <detect_change_example>
+   <include>context/detect_change_example.py</include>
+   </detect_change_example>
+</examples>
