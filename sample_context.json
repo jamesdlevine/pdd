@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "generation_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+
+  "pdd_system_prompt_chars": 3200,
+
+  "provenance": {
+    "timestamp_utc": "2026-01-01T14:30:00Z",
+    "duration_ms": 2340,
+    "model": "claude-sonnet-4-20250514",
+    "provider": "anthropic",
+    "prompt_file": "src/prompts/feature.prompt.md",
+    "pdd_version": "0.5.2"
+  },
+
+  "input": {
+    "total_chars": 48500,
+
+    "api_structure": {
+      "system_prompt_chars": 4200,
+      "user_message_chars": 44300,
+      "assistant_prefill_chars": 0,
+      "other_chars": 0
+    },
+
+    "prompt_breakdown": {
+      "base_prompt_chars": 1850,
+      "prepended_chars": 2400,
+      "appended_chars": 600,
+      "preprocessor_total_chars": 39650,
+      "preprocessor_items": [
+        {
+          "type": "include",
+          "syntax": "directive",
+          "source": "src/utils/helpers.py",
+          "chars": 12400,
+          "line_in_prompt": 5,
+          "include_many": false
+        },
+        {
+          "type": "include",
+          "syntax": "backticks",
+          "source": "src/models/user.py",
+          "chars": 8200,
+          "line_in_prompt": 12,
+          "include_many": true
+        },
+        {
+          "type": "shell",
+          "command": "tree src/ -L 2",
+          "chars": 1200,
+          "line_in_prompt": 3
+        },
+        {
+          "type": "web",
+          "url": "https://docs.example.com/api/reference",
+          "chars": 15000,
+          "line_in_prompt": 20
+        },
+        {
+          "type": "variable",
+          "name": "MODULE_NAME",
+          "chars": 50,
+          "line_in_prompt": 1
+        }
+      ],
+
+      "preprocessor_summary": {
+        "include_count": 2,
+        "include_chars": 20600,
+        "shell_count": 1,
+        "shell_chars": 1200,
+        "web_count": 1,
+        "web_chars": 15000,
+        "variable_count": 1,
+        "variable_chars": 50
+      },
+
+      "few_shot_examples": [
+        {
+          "example_id": "f7e8d9c0-a1b2-4c3d-8e5f-6a7b8c9d0e1f",
+          "chars": 2400,
+          "pinned": true,
+          "quality_score": 0.95
+        },
+        {
+          "example_id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+          "chars": 1800,
+          "pinned": false,
+          "quality_score": 0.82
+        }
+      ],
+      "few_shot_total_chars": 4200
+    }
+  },
+
+  "output": {
+    "response_chars": 8750
+  }
+}
