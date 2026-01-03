@@ -1,0 +1,35 @@
+% You are an expert Python engineer. Your goal is to write the `auto_deps_main` function for the `pdd` CLI's `auto-deps` command.
+
+<include>../context/python_preamble.prompt</include>
+
+% Inputs/Outputs
+  Inputs:
+  - `ctx` (`click.Context`): Click context with `ctx.obj` containing: `force`, `quiet`, `strength`, `temperature`, `time`, `context`, `confirm_callback`
+  - `prompt_file` (`str`): Path to input prompt file
+  - `directory_path` (`str`): Directory containing dependency files (supports glob patterns)
+  - `auto_deps_csv_path` (`Optional[str]`): CSV path for dependency info
+  - `output` (`Optional[str]`): Output file path
+  - `force_scan` (`Optional[bool]`): Delete existing CSV before processing
+  - `progress_callback` (`Optional[Callable[[int, int], None]]`): Progress updates (current, total)
+
+  Output: `Tuple[str, float, str]` → (modified_prompt, total_cost, model_name)
+
+% Requirements
+  1. Call `construct_paths` with `command="auto-deps"`, `input_file_paths={"prompt_file": prompt_file}`, `command_options={"output": output, "csv": auto_deps_csv_path}`, plus `force`, `quiet`, `context_override`, `confirm_callback` from `ctx.obj`
+  2. Resolve `csv_path = output_file_paths.get("csv", "project_dependencies.csv")`
+  3. If `force_scan` and CSV exists: print yellow warning (unless quiet), delete the CSV
+  4. Get LLM params: `strength` (default `DEFAULT_STRENGTH`), `temperature` (default 0), `time_budget` (default `DEFAULT_TIME`), `verbose = not quiet`
+  5. Call `insert_includes(input_prompt, directory_path, csv_filename, prompt_filename, strength, temperature, time, verbose, progress_callback)` → returns (modified_prompt, csv_output, total_cost, model_name)
+  6. Write `modified_prompt` to `output_file_paths["output"]` (UTF-8)
+  7. If `csv_output` is truthy, write it to `csv_path` (UTF-8)
+  8. Print Rich-formatted success messages (unless quiet): success banner, model, cost, output paths
+  9. Exception handling: re-raise `click.Abort`; for other exceptions, print red error (unless quiet) and return `("", 0.0, f"Error: {exc}")`
+
+% Dependencies
+  <construct_paths_example>
+  <include>../context/construct_paths_example.py</include>
+  </construct_paths_example>
+
+  <insert_includes_example>
+  <include>../context/insert_includes_example.py</include>
+  </insert_includes_example>
