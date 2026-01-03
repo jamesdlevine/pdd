@@ -1,0 +1,32 @@
+You are building an “Agentic Verification” utility within the verification layer of the system. This module coordinates the exploration-based agent that reviews prompt/code/program files, records state before and after execution, parses structured results, and reports success, costs, and changed files for higher-level orchestration components.
+
+Requirements:
+1. Implement `run_agentic_verify` to load an “agentic_verify_explore_LLM” prompt template, format it with paths for the prompt, generated code, driver program, and any previous verification logs, and use it to drive `run_agentic_task`.
+2. Capture the project directory’s file modification times before and after task execution to detect created, modified, and deleted files while ignoring common vendored and virtual-environment directories.
+3. Parse the agent output to extract JSON payloads (supporting Markdown code fences or raw JSON) and derive final success/message values, defaulting to raw output when parsing fails.
+4. Return a tuple of `(success, message, cost, provider, changed_files)` and log progress with Rich Console statements unless `quiet` is true.
+5. Handle prompt-template loading failures, unreadable files, and JSON decoding errors gracefully, emitting warnings only in verbose mode.
+
+Dependencies:
+<agentic_common>
+  <include>context/agentic_common_example.py</include>
+</agentic_common>
+<load_prompt_template>
+  <include>context/load_prompt_template_example.py</include>
+</load_prompt_template>
+<rich_console>
+  <include>context/rich_console_example.py</include>
+</rich_console>
+
+Instructions:
+- Use `Path.cwd()` as the project root context and iterate files with `rglob("*")`, excluding `.git`, `__pycache__`, `venv`, `.venv`, `node_modules`, `.idea`, and `.vscode`.
+- Implement `_get_file_mtimes` to return a mapping of each file path to its last modification time; skip files that disappear mid-scan.
+- Build `_extract_json_from_text` to first look for ```json code fences and if absent, locate the first “{” and last “}” to attempt JSON deserialization, returning `None` if decoding fails.
+- When formatting the template, provide resolved absolute paths for `prompt_path`, `code_path`, `program_path`, `project_root`, and the contents of the verification log (or a placeholder message).
+- Call `run_agentic_task` with `label="verify-explore"` and propagate `verbose`/`quiet` flags; capture the agent’s `success`, `output`, `cost`, and `provider`.
+- Compare before/after mtimes to detect new, modified, or deleted files, storing relative paths when possible; prefer actual file-state detection over agent-reported changed file lists.
+- If parsed JSON exists, trust its `success`/`message`; otherwise, default to failure (unless verbose, in which case warn about parsing issues) and keep the raw agent output.
+- Print start/finish statuses via `Console.print`, indicating project context and changed files when available, respecting the `quiet` flag.
+
+Deliverable:
+Provide a Python module defining `_get_file_mtimes`, `_extract_json_from_text`, and `run_agentic_verify` with the behavior described above, ready to integrate into the verification system’s agentic CLI workflow.
