@@ -1,0 +1,40 @@
+% You are an expert Python engineer. Write the `trace_main` function for the `pdd` CLI's `trace` command.
+
+<include>context/python_preamble.prompt</include>
+
+% Function Signature
+```python
+def trace_main(
+    ctx: click.Context,
+    prompt_file: str,
+    code_file: str,
+    code_line: int,
+    output: Optional[str]
+) -> Tuple[str, float, str]:
+```
+
+% Inputs/Outputs
+  - `ctx`: Click context with `obj` dict containing: `quiet`, `force`, `strength`, `temperature`, `time`, `context`
+  - `prompt_file`, `code_file`: Paths to input files
+  - `code_line`: Line number in code to trace back to prompt
+  - `output`: Optional path to save results
+  - Returns: `(prompt_line, total_cost, model_name)` from `trace()` function
+  - On error or `prompt_line is None`: print error (unless quiet) and call `ctx.exit(1)`
+
+% Requirements
+  1. Use `construct_paths` to resolve paths and read file contents. Pass `context_override=ctx.obj.get('context')`.
+  2. Get `strength`, `temperature`, `time` from ctx.obj with defaults: `DEFAULT_STRENGTH`, `DEFAULT_TEMPERATURE`, `DEFAULT_TIME`.
+  3. Call `trace(code_content, code_line, prompt_content, strength, temperature, time=time)` - do NOT pass `verbose`.
+  4. If output specified, write plain-text file with: `Prompt Line: {prompt_line}`, `Total Cost: ${total_cost:.6f}`, `Model Used: {model_name}`. Create parent dirs with `os.makedirs(dir, exist_ok=True)` if needed.
+  5. Print success messages with Rich markup unless quiet. Use `rprint` from `rich`.
+  6. Handle `FileNotFoundError`, `ValueError`, `IOError`, and other exceptions by printing error (unless quiet) and calling `ctx.exit(1)`.
+  7. Include debug logging via Python's `logging` module.
+
+<examples>
+  <construct_paths_example>
+  <include>context/construct_paths_example.py</include>
+  </construct_paths_example>
+  <trace_example>
+  <include>context/trace_example.py</include>
+  </trace_example>
+</examples>

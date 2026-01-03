@@ -43,8 +43,10 @@ def _fallback_prompt_line(prompt_lines: List[str], code_str: str) -> int:
             return i
     return 1
 
+
 class PromptLineOutput(BaseModel):
     prompt_line: str = Field(description="The line from the prompt file that matches the code")
+
 
 def trace(
     code_file: str,
@@ -71,12 +73,11 @@ def trace(
         Tuple[Optional[int], float, str]: (prompt line number, total cost, model name)
     """
     try:
-        # Input validation
-        if not all([code_file, prompt_file]) or not isinstance(code_line, int):
-            raise ValueError("Invalid input parameters")
-
         total_cost = 0
         model_name = ""
+
+        if not all([code_file, prompt_file]) or not isinstance(code_line, int):
+            raise ValueError("Invalid input parameters")
 
         # Step 1: Extract the code line string
         code_lines = code_file.splitlines()
@@ -141,8 +142,6 @@ def trace(
         if verbose:
             console.print(f"Searching for line: {prompt_line_str}")
 
-        # Robust normalization for comparison
-        # If the model echoed wrapper tags like <llm_output>...</llm_output>, extract inner text
         raw_search = prompt_line_str
         try:
             m = re.search(r"<\s*llm_output\s*>(.*?)<\s*/\s*llm_output\s*>", raw_search, flags=re.IGNORECASE | re.DOTALL)
@@ -159,10 +158,8 @@ def trace(
             normalized_line = _normalize_text(line).casefold()
             line_len = len(normalized_line)
 
-            # Base similarity
             ratio = difflib.SequenceMatcher(None, normalized_search, normalized_line).ratio()
 
-            # Boost if one contains the other, but avoid trivial/short lines
             if normalized_search and line_len >= 8:
                 shorter = min(len(normalized_search), line_len)
                 longer = max(len(normalized_search), line_len)
@@ -175,27 +172,23 @@ def trace(
             if verbose:
                 console.print(f"Line {i}: '{line}' - Match ratio: {ratio}")
 
-            # Track best candidate overall, skipping empty lines
             if line_len > 0:
                 if ratio > highest_ratio:
                     highest_ratio = ratio
                     best_candidate_idx = i
                     best_candidate_len = line_len
                 elif abs(ratio - highest_ratio) < 1e-6 and best_candidate_idx is not None:
-                    # Tie-breaker: prefer longer normalized line
                     if line_len > best_candidate_len:
                         best_candidate_idx = i
                         best_candidate_len = line_len
 
-            # Early exit on exact normalized equality
             if normalized_search == normalized_line:
                 best_match = i
                 highest_ratio = 1.0
                 break
 
-        # Decide on acceptance thresholds
-        primary_threshold = 0.8  # lowered threshold for normal acceptance
-        fallback_threshold = 0.6  # low-confidence fallback threshold
+        primary_threshold = 0.8
+        fallback_threshold = 0.6
 
         if best_match is None and best_candidate_idx is not None:
             if highest_ratio >= primary_threshold:
@@ -207,7 +200,6 @@ def trace(
                         f"[yellow]Low-confidence match selected (ratio={highest_ratio:.3f}).[/yellow]"
                     )
 
-        # Step 7b: Multi-line window matching (sizes 2 and 3) if no strong single-line match
         if (best_match is None) or (highest_ratio < primary_threshold):
             if verbose:
                 console.print("[blue]No strong single-line match; trying multi-line windows...[/blue]")
@@ -220,16 +212,15 @@ def trace(
                 if len(prompt_lines) < window_size:
                     continue
                 for start_idx in range(1, len(prompt_lines) - window_size + 2):
-                    window_lines = prompt_lines[start_idx - 1 : start_idx - 1 + window_size]
+                    window_lines = prompt_lines[start_idx - 1: start_idx - 1 + window_size]
                     window_text = " ".join(window_lines)
-                    normalized_window = normalize_text(window_text).casefold()
+                    normalized_window = _normalize_text(window_text).casefold()
                     seg_len = len(normalized_window)
                     if seg_len == 0:
                         continue
 
                     ratio = difflib.SequenceMatcher(None, normalized_search, normalized_window).ratio()
 
-                    # Containment boost under similar length condition
                     shorter = min(len(normalized_search), seg_len)
                     longer = max(len(normalized_search), seg_len)
                     length_ratio = (shorter / longer) if longer else 0.0
@@ -246,10 +237,9 @@ def trace(
 
                     if verbose:
                         console.print(
-                            f"Window {start_idx}-{start_idx+window_size-1}: ratio={ratio}"
+                            f"Window {start_idx}-{start_idx + window_size - 1}: ratio={ratio}"
                         )
 
-                    # Track best window, prefer higher ratio; tie-breaker: larger window, then longer segment
                     if ratio > win_best_ratio + 1e-6 or (
                         abs(ratio - win_best_ratio) < 1e-6
                         and (window_size > win_best_size or (window_size == win_best_size and seg_len > 0))
@@ -270,13 +260,11 @@ def trace(
                             f"[yellow]Low-confidence multi-line match selected (ratio={win_best_ratio:.3f}).[/yellow]"
                         )
 
-        # Step 7c: Deterministic fallback when LLM output cannot be matched reliably
         fallback_used = False
         if best_match is None:
             best_match = _fallback_prompt_line(prompt_lines, code_str)
             fallback_used = True
 
-        # Step 8: Return results
         if verbose:
             console.print(f"[green]Found matching line: {best_match}[/green]")
             console.print(f"[green]Total cost: ${total_cost:.6f}[/green]")
@@ -289,7 +277,11 @@ def trace(
     except Exception as e:
         console.print(f"[bold red]Error in trace function: {str(e)}[/bold red]")
         try:
-            fallback_line = _fallback_prompt_line(prompt_file.splitlines(), code_file.splitlines()[code_line - 1] if 0 < code_line <= len(code_file.splitlines()) else "")
+            fallback_line = 1
+            if code_file and prompt_file and isinstance(code_line, int):
+                c_lines = code_file.splitlines()
+                if 0 < code_line <= len(c_lines):
+                    fallback_line = _fallback_prompt_line(prompt_file.splitlines(), c_lines[code_line - 1])
         except Exception:
             fallback_line = 1
         return fallback_line, 0.0, "fallback"

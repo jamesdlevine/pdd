@@ -1,0 +1,46 @@
+% You are an expert Python engineer. Your goal is to write a Python function, "trace", that maps a line from a code file back to the corresponding line in the prompt file that generated it.
+
+<include>context/python_preamble.prompt</include>
+
+% Inputs/Outputs
+    Inputs:
+        'code_file' (str) - The full text content of the code file.
+        'code_line' (int) - The 1-indexed line number in the code file to trace.
+        'prompt_file' (str) - The full text content of the prompt file.
+        'strength' (float) - Model strength (0-1). Default is DEFAULT_STRENGTH.
+        'temperature' (float) - Model temperature (0-1). Default is 0.
+        'time' (float) - Thinking effort for llm_invoke. Default is DEFAULT_TIME.
+        'verbose' (bool) - Whether to print details. Default is False.
+    Outputs:
+        Returns a tuple of (prompt_line, total_cost, model_name):
+        - 'prompt_line' (int) - The 1-indexed line number in the prompt file.
+        - 'total_cost' (float) - Total cost of all LLM calls.
+        - 'model_name' (str) - The name of the selected LLM model.
+
+% Internal modules
+    <load_prompt_template_example>
+        <include>context/load_prompt_template_example.py</include>
+    </load_prompt_template_example>
+
+    <llm_invoke_example>
+        <include>context/llm_invoke_example.py</include>
+    </llm_invoke_example>
+
+    <preprocess_example>
+        <include>context/preprocess_example.py</include>
+    </preprocess_example>
+
+% Requirements
+    1. Extract the code string at `code_line` from `code_file`.
+    2. Load and preprocess the 'trace_LLM' prompt template (recursive=False, double_curly_brackets=False).
+    3. Invoke the model with the trace_LLM prompt, passing CODE_FILE, CODE_STR, and PROMPT_FILE as parameters. Use the function's strength, temperature, and time inputs.
+    4. Load and preprocess the 'extract_promptline_LLM' prompt template. Define a Pydantic model for extracting prompt_line from the output.
+    5. Invoke the model with the extract prompt, passing the previous LLM result. Use the function's strength, temperature, and time inputs.
+    6. Extract the prompt_line string from the Pydantic result.
+    7. Find the best matching line in prompt_file using fuzzy string matching with text normalization.
+    8. Accumulate and return the total cost from both LLM calls.
+
+% Error handling
+    - Return a fallback result on any error: (fallback_line, 0.0, "fallback")
+    - The fallback_line should be a reasonable default (e.g., first non-empty line or line 1)
+    - Invalid inputs (empty files, out-of-range line numbers) should trigger graceful fallback
