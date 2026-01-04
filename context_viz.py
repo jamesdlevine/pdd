@@ -174,6 +174,20 @@ def render_detailed(context: dict[str, Any]) -> str:
     lines.append(f"  Output: {render_bar(total_output, total)} {format_chars(total_output)}")
     lines.append("")
 
+    # Token counts (if available)
+    prompt_tokens = out.get("prompt_tokens_reported")
+    response_tokens_reported = out.get("response_tokens_reported")
+    response_tokens_estimated = out.get("response_tokens_estimated")
+    if prompt_tokens or response_tokens_reported:
+        lines.append("TOKENS (from provider)")
+        if prompt_tokens:
+            lines.append(f"  Prompt tokens:   {prompt_tokens:,}")
+        if response_tokens_reported:
+            lines.append(f"  Response tokens: {response_tokens_reported:,}")
+        if response_tokens_estimated:
+            lines.append(f"  Response (est):  {response_tokens_estimated:,}")
+        lines.append("")
+
     # API structure breakdown
     api = inp.get("api_structure", {})
     if api:

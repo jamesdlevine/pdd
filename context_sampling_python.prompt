@@ -1,0 +1,26 @@
+Storage layer for context map data collected during `pdd generate` operations.
+
+```context_map.schema.json```
+
+% Requirements
+
+1. Accept context data matching the schema and persist to JSON files
+2. Support multiple LLM calls per generation; accumulate duration and token counts, keep final char counts
+3. Store context files in `.pdd_context/` directory alongside the output file
+4. Name files as `<output_basename>.context.<N>.json` where N increases monotonically from 1
+5. Retain only the most recent N context files per devunit (default N=5)
+6. When retention limit reached, delete the lowest-numbered file before writing
+7. Sequence gaps from deletion are acceptable; never renumber existing files
+8. Handle errors gracefully: log warnings but never fail the generation
+
+% Contracts
+
+- Input: all fields defined in the JSON schema (required and optional)
+- Output: path to written context file, or error indication
+- Written files must validate against the schema
+
+% Invariants
+
+- A generation_id maps to exactly one context file
+- Context files are valid JSON matching schema_version "1.0"
+- File count per devunit never exceeds configured maximum

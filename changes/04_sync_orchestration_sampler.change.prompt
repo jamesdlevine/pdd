@@ -1,0 +1,84 @@
+<pdd>
+Target: pdd/sync_orchestration.py
+
+Prerequisites (run from ~/pdd):
+  # Generate prompt from existing code if it doesn't exist
+  pdd update pdd/sync_orchestration.py --output prompts/sync_orchestration_python.prompt
+
+Apply change (run from ~/pdd):
+  pdd change \
+    ~/pdd_context_viz/changes/04_sync_orchestration_sampler.change.prompt \
+    pdd/sync_orchestration.py \
+    prompts/sync_orchestration_python.prompt \
+    --output prompts/sync_orchestration_python.prompt
+
+Regenerate code:
+  pdd generate sync_orchestration --language python
+</pdd>
+
+Add context sampler initialization and finalization to the sync orchestration workflow.
+
+% Changes Required
+
+1. Add import at top of file:
+   ```python
+   import uuid
+   from .context_sampler import ContextSampler
+   ```
+
+2. Add config option check (context sampling can be disabled):
+   ```python
+   context_sampling_enabled = context_config.get('context_sampling', True)
+   max_context_samples = context_config.get('context_samples', 5)
+   ```
+
+3. Before calling code_generator, initialize the sampler if enabled:
+   ```python
+   sampler = None
+   if context_sampling_enabled:
+       sampler = ContextSampler(
+           output_path=code_output_path,
+           max_samples=max_context_samples
+       )
+       generation_id = str(uuid.uuid4())
+       sampler.start_generation(
+           generation_id=generation_id,
+           prompt_file=str(prompt_file_path),
+           model=model_name or "unknown",
+           provider="unknown",  # Will be updated after first LLM call
+       )
+   ```
+
+4. Pass sampler to code_generator:
+   ```python
+   result, cost, model = code_generator(
+       prompt=prompt_content,
+       language=language,
+       strength=strength,
+       temperature=temperature,
+       time=time_param,
+       verbose=verbose,
+       context_sampler=sampler,  # NEW
+   )
+   ```
+
+5. After code_generator returns successfully, finalize the sampler:
+   ```python
+   if sampler:
+       try:
+           context_path = sampler.finalize()
+           if verbose and not quiet:
+               console.print(f"[dim]Context saved: {context_path}[/dim]")
+       except Exception as e:
+           # Non-fatal: log warning but don't fail the sync
+           if verbose:
+               console.print(f"[yellow]Warning: Failed to save context: {e}[/yellow]")
+   ```
+
+% Error Handling
+
+Context sampling should never cause sync to fail. All sampler operations should be wrapped in try/except with warnings logged but exceptions suppressed.
+
+% Backward Compatibility
+
+When `context_sampling` config option is False or missing, no sampler is created and behavior is unchanged.

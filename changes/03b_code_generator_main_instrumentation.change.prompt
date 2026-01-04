@@ -1,0 +1,101 @@
+<pdd>
+Target: pdd/code_generator_main.py
+
+Prerequisites (run from ~/pdd):
+  # Generate prompt from existing code if it doesn't exist
+  pdd update pdd/code_generator_main.py --output prompts/code_generator_main_python.prompt
+
+Apply change (run from ~/pdd):
+  pdd change \
+    ~/pdd_context_viz/changes/03b_code_generator_main_instrumentation.change.prompt \
+    pdd/code_generator_main.py \
+    prompts/code_generator_main_python.prompt \
+    --output prompts/code_generator_main_python.prompt
+
+Regenerate code:
+  pdd generate code_generator_main --language python
+</pdd>
+
+Add context sampling instrumentation to `code_generator_main`. This is critical because:
+1. Preprocessing happens HERE (not in code_generator.py)
+2. Cloud execution bypasses code_generator.py entirely
+3. This function has access to prompt file paths and output paths
+
+% Changes to Function Signature
+
+Add an optional `context_sampler` parameter:
+
+```python
+def code_generator_main(
+    ctx: click.Context,
+    prompt_file: str,
+    output: Optional[str],
+    original_prompt_file_path: Optional[str],
+    force_incremental_flag: bool,
+    env_vars: Optional[Dict[str, str]] = None,
+    unit_test_file: Optional[str] = None,
+    exclude_tests: bool = False,
+    context_sampler: Optional['ContextSampler'] = None,  # NEW
+) -> Tuple[str, bool, float, str]:
+```
+
+% Instrumentation Points
+
+1. Before preprocessing, capture raw devunit prompt size:
+   ```python
+   devunit_prompt_chars = len(prompt_content)
+   ```
+
+2. Replace `pdd_preprocess()` calls with `preprocess_with_metadata()` when sampler provided:
+   ```python
+   if context_sampler:
+       from .preprocess import preprocess_with_metadata
+       processed, preprocess_meta = preprocess_with_metadata(prompt_content, recursive=True, double_curly_brackets=False)
+       processed = _expand_vars(processed, env_vars)
+       processed, _ = preprocess_with_metadata(processed, recursive=False, double_curly_brackets=True)
+   else:
+       processed = pdd_preprocess(prompt_content, recursive=True, double_curly_brackets=False)
+       processed = _expand_vars(processed, env_vars)
+       processed = pdd_preprocess(processed, recursive=False, double_curly_brackets=True)
+       preprocess_meta = None
+   ```
+
+3. For CLOUD execution path (lines ~787-806), record metrics from response:
+   ```python
+   if context_sampler:
+       context_sampler.record_call(
+           input_chars=len(processed_prompt_for_cloud),
+           output_chars=len(generated_code_content),
+           duration_ms=0,  # Not available from cloud response
+           prompt_tokens_reported=None,  # Cloud doesn't return this yet
+           response_tokens_reported=None,
+       )
+   ```
+
+4. For LOCAL execution path (lines ~856-880), extract metrics from response:
+   ```python
+   # Assuming code_generator returns extended dict with tokens
+   if context_sampler:
+       context_sampler.record_call(
+           input_chars=len(local_prompt),
+           output_chars=len(generated_code_content),
+           duration_ms=response.get('duration_ms', 0),
+           prompt_tokens_reported=response.get('input_tokens'),
+           response_tokens_reported=response.get('output_tokens'),
+       )
+       if preprocess_meta:
+           context_sampler.record_prompt_breakdown(
+               devunit_prompt_chars=devunit_prompt_chars,
+               preprocessor_items=[asdict(item) for item in preprocess_meta.items],
+           )
+   ```
+
+% Note on code_generator.py
+
+The change to `code_generator.py` (03_code_generator_instrumentation.change.prompt) is simpler now - it just needs to:
+1. Pass through the extended return dict from llm_invoke
+2. NOT do its own preprocessing instrumentation (that's handled here)
+
+% Backward Compatibility
+
+When `context_sampler` is None (default), behavior is unchanged.

@@ -99,6 +99,9 @@
   },
 
   "output": {
-    "response_chars": 8750
+    "response_chars": 8750,
+    "response_tokens_reported": 2187,
+    "response_tokens_estimated": 2150,
+    "prompt_tokens_reported": 12125
   }
 }

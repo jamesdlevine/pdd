@@ -1,0 +1,46 @@
+<pdd>
+Target: pdd/context_sampler.py (NEW FILE)
+
+Generate (run from ~/pdd after copying files):
+  # Copy prompt and schema to pdd prompts directory
+  cp ~/pdd_context_viz/changes/00_context_sampler_python.prompt prompts/context_sampler_python.prompt
+  cp ~/pdd_context_viz/context_map.schema.json prompts/context_map.schema.json
+
+  # Generate the new module
+  pdd generate context_sampler --language python
+</pdd>
+
+Storage layer for context map data collected during `pdd generate` operations.
+
+```context_map.schema.json```
+
+% Requirements
+
+1. Accept context data matching the schema and persist to JSON files
+2. Support multiple LLM calls per generation; accumulate duration and token counts, keep final char counts
+3. Store context files in `.pdd_context/` directory alongside the output file
+4. Name files as `<output_basename>.context.<N>.json` where N increases monotonically from 1
+5. Retain only the most recent N context files per devunit (default N=5)
+6. When retention limit reached, delete the lowest-numbered file before writing
+7. Sequence gaps from deletion are acceptable; never renumber existing files
+8. Handle errors gracefully: log warnings but never fail the generation
+
+% Contracts
+
+- Input: all fields defined in the JSON schema (required and optional)
+- Output: path to written context file, or None on error
+- Written files must validate against the schema
+
+% Invariants
+
+- A generation_id maps to exactly one context file
+- Context files are valid JSON matching schema_version "1.0"
+- File count per devunit never exceeds configured maximum
+
+% Implementation Notes
+
+- Use `dataclasses` for internal state management
+- Use `datetime.utcnow().isoformat() + 'Z'` for timestamps
+- Use `pathlib.Path` for file operations
+- Log warnings via `logging.getLogger(__name__)` - never print directly
+- The `finalize()` method computes summary fields before writing

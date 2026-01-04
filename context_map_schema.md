@@ -118,7 +118,10 @@ Capture a context map for each generation round with the following data:
   },
 
   "output": {
-    "response_chars": 8750
+    "response_chars": 8750,
+    "response_tokens_reported": 2187,
+    "response_tokens_estimated": 2150,
+    "prompt_tokens_reported": 12125
   }
 }
 ```
@@ -136,6 +139,9 @@ Capture a context map for each generation round with the following data:
 | `preprocessor_summary` | Aggregated stats for quick visualization (pie charts, etc.) |
 | `preprocessor_summary_extra` | Overlapping stats like `include_many_*` (subset of includes) |
 | `few_shot_examples` | Example IDs, sizes, `pinned` status, and `quality_score` from cloud mode |
+| `response_tokens_reported` | Output tokens as reported by the LLM provider API |
+| `response_tokens_estimated` | Output tokens estimated locally (e.g., via tiktoken) |
+| `prompt_tokens_reported` | Input tokens as reported by the LLM provider API |
 
 ## CLI Visualization Tool
 

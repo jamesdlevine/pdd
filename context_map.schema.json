@@ -1,0 +1,338 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pdd.dev/schemas/context-map-v1.json",
+  "title": "PDD Context Map",
+  "description": "Schema for logging context metadata during pdd generate for analysis and visualization",
+  "type": "object",
+  "required": ["schema_version", "generation_id", "provenance", "input", "output"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for forwards compatibility",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "generation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this generation"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "input": {
+      "$ref": "#/$defs/input"
+    },
+    "output": {
+      "$ref": "#/$defs/output"
+    }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "description": "Who/what/when for reproducibility and cost attribution",
+      "required": ["timestamp_utc", "model", "provider", "prompt_file"],
+      "properties": {
+        "timestamp_utc": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of generation"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total API call duration in milliseconds"
+        },
+        "model": {
+          "type": "string",
+          "description": "Model identifier (e.g., claude-sonnet-4-20250514)"
+        },
+        "provider": {
+          "type": "string",
+          "description": "LLM provider (e.g., anthropic, openai)"
+        },
+        "prompt_file": {
+          "type": "string",
+          "description": "Path to the devunit prompt file"
+        },
+        "pdd_version": {
+          "type": "string",
+          "description": "PDD version used for generation"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "description": "Input context sent to the LLM",
+      "required": ["total_chars"],
+      "properties": {
+        "total_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total character count of all input"
+        },
+        "api_structure": {
+          "$ref": "#/$defs/api_structure"
+        },
+        "prompt_breakdown": {
+          "$ref": "#/$defs/prompt_breakdown"
+        }
+      }
+    },
+    "api_structure": {
+      "type": "object",
+      "description": "Breakdown by API message structure (varies by provider)",
+      "properties": {
+        "system_prompt_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in system prompt"
+        },
+        "user_message_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in user message(s)"
+        },
+        "assistant_prefill_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in assistant prefill (if used)"
+        },
+        "other_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in other API fields"
+        }
+      }
+    },
+    "prompt_breakdown": {
+      "type": "object",
+      "description": "Breakdown by PDD prompt components",
+      "properties": {
+        "pdd_system_prompt_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in PDD runtime system prompt"
+        },
+        "devunit_prompt_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in raw devunit prompt (before preprocessing)"
+        },
+        "prepended_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters prepended via PDD config"
+        },
+        "appended_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters appended via PDD config"
+        },
+        "preprocessor_total_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total characters from all preprocessor expansions"
+        },
+        "preprocessor_items": {
+          "type": "array",
+          "description": "Individual preprocessor directive instances",
+          "items": {
+            "$ref": "#/$defs/preprocessor_item"
+          }
+        },
+        "preprocessor_summary": {
+          "$ref": "#/$defs/preprocessor_summary"
+        },
+        "preprocessor_summary_extra": {
+          "$ref": "#/$defs/preprocessor_summary_extra"
+        },
+        "few_shot_examples": {
+          "type": "array",
+          "description": "Few-shot examples included in context",
+          "items": {
+            "$ref": "#/$defs/few_shot_example"
+          }
+        },
+        "few_shot_total_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total characters from all few-shot examples"
+        }
+      }
+    },
+    "preprocessor_item": {
+      "type": "object",
+      "description": "A single preprocessor directive instance",
+      "required": ["type", "chars"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["include", "shell", "web", "variable"],
+          "description": "Type of preprocessor directive"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters produced by this directive"
+        },
+        "line_in_prompt": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Line number in the devunit prompt file"
+        },
+        "syntax": {
+          "type": "string",
+          "enum": ["directive", "backticks"],
+          "description": "Syntax used (for includes: <include> vs triple backticks)"
+        },
+        "source": {
+          "type": "string",
+          "description": "File path (for includes)"
+        },
+        "include_many": {
+          "type": "boolean",
+          "description": "Whether this is a bulk include pattern"
+        },
+        "command": {
+          "type": "string",
+          "description": "Shell command (for shell type)"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL fetched (for web type)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Variable name (for variable type)"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "include" } } },
+          "then": { "required": ["source"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "shell" } } },
+          "then": { "required": ["command"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "web" } } },
+          "then": { "required": ["url"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "variable" } } },
+          "then": { "required": ["name"] }
+        }
+      ]
+    },
+    "preprocessor_summary": {
+      "type": "object",
+      "description": "Aggregated counts by preprocessor type",
+      "properties": {
+        "include_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "include_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shell_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shell_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "web_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "web_chars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variable_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variable_chars": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "preprocessor_summary_extra": {
+      "type": "object",
+      "description": "Additional overlapping stats (subsets of main counts)",
+      "properties": {
+        "include_many_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of bulk include patterns"
+        },
+        "include_many_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters from bulk includes (subset of include_chars)"
+        }
+      }
+    },
+    "few_shot_example": {
+      "type": "object",
+      "description": "A few-shot example included in context",
+      "required": ["example_id", "chars"],
+      "properties": {
+        "example_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique identifier for this example"
+        },
+        "chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Character count of this example"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether this example is pinned (always included)"
+        },
+        "quality_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Quality score from cloud mode (0-1)"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "Output from the LLM",
+      "required": ["response_chars"],
+      "properties": {
+        "response_chars": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Characters in LLM response"
+        },
+        "response_tokens_reported": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Output tokens as reported by the LLM provider API"
+        },
+        "response_tokens_estimated": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Output tokens estimated locally (e.g., via tiktoken)"
+        },
+        "prompt_tokens_reported": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Input tokens as reported by the LLM provider API"
+        }
+      }
+    }
+  }
+}
