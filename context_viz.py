@@ -73,16 +73,14 @@ def render_summary(context: dict[str, Any]) -> str:
     summary = breakdown.get("preprocessor_summary", {})
 
     total_input = inp.get("total_chars", 0)
-    total_output = out.get("response_chars", 0)
-    total = total_input + total_output
+    total = total_input  # Summary view only shows input breakdown
 
     # Calculate segment sizes
-    base = breakdown.get("base_prompt_chars", 0)
+    pdd_system_chars = breakdown.get("pdd_system_prompt_chars", 0)
+    devunit_chars = breakdown.get("devunit_prompt_chars", 0)
     prepended = breakdown.get("prepended_chars", 0)
     appended = breakdown.get("appended_chars", 0)
-    base_total = base + prepended + appended
-
-    pdd_system_chars = context.get("pdd_system_prompt_chars", 0)
+    prepend_append_total = prepended + appended
     include_chars = summary.get("include_chars", 0)
     shell_chars = summary.get("shell_chars", 0)
     web_chars = summary.get("web_chars", 0)
@@ -90,38 +88,36 @@ def render_summary(context: dict[str, Any]) -> str:
     few_shot_chars = breakdown.get("few_shot_total_chars", 0)
 
     # Build segments for grid (symbol, chars)
-    # PDD system prompt first, then other categories
+    # Order: PDD system, devunit, includes, web, shell, variables, few-shot, prepend/append
     segments = [
-        ("▣", pdd_system_chars), # PDD system prompt - first
-        ("█", include_chars),    # Includes - solid
-        ("▓", web_chars),        # Web - dense
-        ("▒", shell_chars),      # Shell - medium
-        ("░", variable_chars),   # Variables - light
-        ("◇", few_shot_chars),   # Few-shot examples
-        ("◆", base_total),       # Base prompt
-        ("○", total_output),     # Output
+        ("▣", pdd_system_chars),    # PDD system prompt
+        ("◆", devunit_chars),       # Devunit prompt (bare)
+        ("█", include_chars),       # Disk file includes
+        ("▓", web_chars),           # Web includes
+        ("⌘", shell_chars),         # Shell includes
+        ("•", variable_chars),      # Variable substitutions
+        ("◇", few_shot_chars),      # Few-shot examples
+        ("▤", prepend_append_total),# Prepend/append (PDD system)
     ]
 
     grid_rows = render_grid(segments, total)
 
     # Header
     lines.append("PDD CONTEXT MAP")
+    lines.append(f"{prov.get('prompt_file', 'unknown')} · {format_chars(total_input)} total input")
     lines.append("")
 
-    # Build legend entries
+    # Build legend entries (matching grid order)
     few_shot_count = len(breakdown.get("few_shot_examples", []))
     legend = [
-        f"{prov.get('prompt_file', 'unknown')}",
-        f"{prov.get('model', 'unknown')} · {format_chars(total_input)} in / {format_chars(total_output)} out",
-        "",
         f"▣ PDD system: {format_chars(pdd_system_chars)} ({format_pct(pdd_system_chars, total)})" if pdd_system_chars else None,
+        f"◆ Devunit: {format_chars(devunit_chars)} ({format_pct(devunit_chars, total)})" if devunit_chars else None,
         f"█ Includes: {format_chars(include_chars)} ({format_pct(include_chars, total)})" if include_chars else None,
         f"▓ Web: {format_chars(web_chars)} ({format_pct(web_chars, total)})" if web_chars else None,
-        f"▒ Shell: {format_chars(shell_chars)} ({format_pct(shell_chars, total)})" if shell_chars else None,
-        f"░ Variables: {format_chars(variable_chars)} ({format_pct(variable_chars, total)})" if variable_chars else None,
+        f"⌘ Shell: {format_chars(shell_chars)} ({format_pct(shell_chars, total)})" if shell_chars else None,
+        f"• Variables: {format_chars(variable_chars)} ({format_pct(variable_chars, total)})" if variable_chars else None,
         f"◇ Few-shot: {few_shot_count}x {format_chars(few_shot_chars)} ({format_pct(few_shot_chars, total)})" if few_shot_chars else None,
-        f"◆ Base/prepend/append: {format_chars(base_total)} ({format_pct(base_total, total)})" if base_total else None,
-        f"○ Output: {format_chars(total_output)} ({format_pct(total_output, total)})",
+        f"▤ Prepend/append: {format_chars(prepend_append_total)} ({format_pct(prepend_append_total, total)})" if prepend_append_total else None,
     ]
     legend = [l for l in legend if l is not None]
 
@@ -163,8 +159,11 @@ def render_detailed(context: dict[str, Any]) -> str:
     total_output = out.get("response_chars", 0)
     total = total_input + total_output
 
+    # Prompt breakdown
+    breakdown = inp.get("prompt_breakdown", {})
+
     # PDD system prompt
-    pdd_system_chars = context.get("pdd_system_prompt_chars", 0)
+    pdd_system_chars = breakdown.get("pdd_system_prompt_chars", 0)
     if pdd_system_chars:
         lines.append("PDD SYSTEM PROMPT")
         lines.append(f"  {format_chars(pdd_system_chars)}")
@@ -187,16 +186,15 @@ def render_detailed(context: dict[str, Any]) -> str:
         lines.append("")
 
     # Prompt breakdown
-    breakdown = inp.get("prompt_breakdown", {})
     if breakdown:
         lines.append("PROMPT BREAKDOWN")
-        base = breakdown.get("base_prompt_chars", 0)
+        devunit = breakdown.get("devunit_prompt_chars", 0)
         prepended = breakdown.get("prepended_chars", 0)
         appended = breakdown.get("appended_chars", 0)
         preproc = breakdown.get("preprocessor_total_chars", 0)
-        prompt_total = base + prepended + appended + preproc
+        prompt_total = devunit + prepended + appended + preproc
 
-        lines.append(f"  {'Base prompt':20} {render_bar(base, prompt_total, 25)} {format_chars(base)}")
+        lines.append(f"  {'Devunit prompt':20} {render_bar(devunit, prompt_total, 25)} {format_chars(devunit)}")
         if prepended:
             lines.append(f"  {'Prepended':20} {render_bar(prepended, prompt_total, 25)} {format_chars(prepended)}")
         if appended:

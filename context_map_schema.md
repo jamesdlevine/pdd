@@ -29,14 +29,12 @@ Capture a context map for each generation round with the following data:
   "schema_version": "1.0",
   "generation_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
 
-  "pdd_system_prompt_chars": 3200,
-
   "provenance": {
     "timestamp_utc": "2026-01-01T14:30:00Z",
     "duration_ms": 2340,
     "model": "claude-sonnet-4-20250514",
     "provider": "anthropic",
-    "prompt_file": "src/prompts/feature.prompt.md",
+    "prompt_file": "prompts/feature_language.prompt",
     "pdd_version": "0.5.2"
   },
 
@@ -51,7 +49,8 @@ Capture a context map for each generation round with the following data:
     },
 
     "prompt_breakdown": {
-      "base_prompt_chars": 1850,
+      "pdd_system_prompt_chars": 3200,
+      "devunit_prompt_chars": 1850,
 
       "prepended_chars": 2400,
       "appended_chars": 600,
@@ -101,8 +100,13 @@ Capture a context map for each generation round with the following data:
         "shell_chars": 1200,
         "web_count": 1,
         "web_chars": 15000,
-        "variable_count": 1,
-        "variable_chars": 50
+        "variable_count": 3,
+        "variable_chars": 1800
+      },
+
+      "preprocessor_summary_extra": {
+        "include_many_count": 1,
+        "include_many_chars": 8200
       },
 
       "few_shot_examples": [
@@ -123,13 +127,14 @@ Capture a context map for each generation round with the following data:
 
 | Section | Purpose |
 |---------|---------|
-| `pdd_system_prompt_chars` | Size of PDD runtime prompt prepended to all generations |
 | `provenance` | Who/what/when for reproducibility and cost attribution |
 | `api_structure` | Maps to actual API call structure (varies by provider) |
-| `base_prompt_chars` | The raw prompt file before preprocessing |
+| `pdd_system_prompt_chars` | Size of PDD runtime prompt prepended to all generations |
+| `devunit_prompt_chars` | The raw devunit prompt file before preprocessing |
 | `prepended/appended` | Config-driven injections (separate from inline directives) |
 | `preprocessor_items` | Individual instances; `include_many` flag distinguishes bulk includes |
 | `preprocessor_summary` | Aggregated stats for quick visualization (pie charts, etc.) |
+| `preprocessor_summary_extra` | Overlapping stats like `include_many_*` (subset of includes) |
 | `few_shot_examples` | Example IDs, sizes, `pinned` status, and `quality_score` from cloud mode |
 
 ## CLI Visualization Tool
@@ -153,17 +158,18 @@ cat context.json | python3 context_viz.py
 
 ```
 PDD CONTEXT MAP
+prompts/feature_language.prompt · 48.5K total input
 
-▣ ▣ ▣ ▣ ▣ ▣ █ █ █ █   src/prompts/feature.prompt.md
-█ █ █ █ █ █ █ █ █ █   claude-sonnet-4-20250514 · 48.5K in / 8.8K out
-█ █ █ █ █ █ █ █ █ █
-█ █ █ █ █ █ █ █ █ █   ▣ PDD system: 3.2K (6%)
-█ █ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓   █ Includes: 20.6K (36%)
-▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓   ▓ Web: 15.0K (26%)
-▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▒ ▒   ▒ Shell: 1.2K (2%)
-◇ ◇ ◇ ◇ ◇ ◇ ◇ ◆ ◆ ◆   ░ Variables: 50 (0%)
-◆ ◆ ◆ ◆ ◆ ○ ○ ○ ○ ○   ◇ Few-shot: 2x 4.2K (7%)
-○ ○ ○ ○ ○ ○ ○ ○ ○ ○   ◆ Base/prepend/append: 4.8K (8%)
+▣ ▣ ▣ ▣ ▣ ▣ ▣ ◆ ◆ ◆   ▣ PDD system: 3.2K (7%)
+◆ █ █ █ █ █ █ █ █ █   ◆ Devunit: 1.9K (4%)
+█ █ █ █ █ █ █ █ █ █   █ Includes: 20.6K (42%)
+█ █ █ █ █ █ █ █ █ █   ▓ Web: 15.0K (31%)
+█ █ █ █ █ █ █ █ █ █   ⌘ Shell: 1.2K (2%)
+█ █ █ ▓ ▓ ▓ ▓ ▓ ▓ ▓   • Variables: 1.8K (4%)
+▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓   ◇ Few-shot: 2x 4.2K (9%)
+▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓ ▓   ▤ Prepend/append: 3.0K (6%)
+▓ ▓ ▓ ▓ ⌘ ⌘ • • • •
+◇ ◇ ◇ ◇ ◇ ◇ ◇ ◇ ◇ ▤
 
 Duration: 2340ms · 2026-01-01T14:30:00Z
 ```
@@ -174,7 +180,7 @@ Duration: 2340ms · 2026-01-01T14:30:00Z
 ────────────────────────────────────────────────────────────
 PDD CONTEXT MAP
 ────────────────────────────────────────────────────────────
-Prompt:    src/prompts/feature.prompt.md
+Prompt:    prompts/feature_language.prompt
 Model:     claude-sonnet-4-20250514
 Provider:  anthropic
 Timestamp: 2026-01-01T14:30:00Z
@@ -192,7 +198,7 @@ API STRUCTURE
   User Message         ██████████████████████░░░ 44.3K
 
 PROMPT BREAKDOWN
-  Base prompt          █░░░░░░░░░░░░░░░░░░░░░░░░ 1.9K
+  Devunit prompt       █░░░░░░░░░░░░░░░░░░░░░░░░ 1.9K
   Prepended            █░░░░░░░░░░░░░░░░░░░░░░░░ 2.4K
   Appended             ░░░░░░░░░░░░░░░░░░░░░░░░░ 600
   Preprocessor         ██████████████████████░░░ 39.6K

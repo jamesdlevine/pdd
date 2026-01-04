@@ -2,14 +2,12 @@
   "schema_version": "1.0",
   "generation_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
 
-  "pdd_system_prompt_chars": 3200,
-
   "provenance": {
     "timestamp_utc": "2026-01-01T14:30:00Z",
     "duration_ms": 2340,
     "model": "claude-sonnet-4-20250514",
     "provider": "anthropic",
-    "prompt_file": "src/prompts/feature.prompt.md",
+    "prompt_file": "prompts/feature_language.prompt",
     "pdd_version": "0.5.2"
   },
 
@@ -24,7 +22,8 @@
     },
 
     "prompt_breakdown": {
-      "base_prompt_chars": 1850,
+      "pdd_system_prompt_chars": 3200,
+      "devunit_prompt_chars": 1850,
       "prepended_chars": 2400,
       "appended_chars": 600,
       "preprocessor_total_chars": 39650,
@@ -72,8 +71,13 @@
         "shell_chars": 1200,
         "web_count": 1,
         "web_chars": 15000,
-        "variable_count": 1,
-        "variable_chars": 50
+        "variable_count": 3,
+        "variable_chars": 1800
+      },
+
+      "preprocessor_summary_extra": {
+        "include_many_count": 1,
+        "include_many_chars": 8200
       },
 
       "few_shot_examples": [
