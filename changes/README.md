@@ -2,16 +2,38 @@
 
 These prompts describe the modifications needed to add context map capture to PDD.
 
+## Directory Structure
+
+```
+pdd_context_viz/
+├── changes/                      # Change prompts (this directory)
+│   ├── 01_extend_llm_invoke_return.change.prompt
+│   ├── 02_preprocess_with_metadata.change.prompt
+│   ├── 03_code_generator_instrumentation.change.prompt
+│   ├── 03b_code_generator_main_instrumentation.change.prompt
+│   └── 04_sync_orchestration_sampler.change.prompt
+├── pdd_integration/
+│   ├── prompts/                  # Generation prompts (copy to ~/pdd/prompts/)
+│   │   ├── context_map.schema.json
+│   │   ├── context_sampler_python.prompt
+│   │   └── context_viz_python.prompt
+│   ├── pdd/                      # Generated code (copy to ~/pdd/pdd/)
+│   ├── examples/                 # Sample data files
+│   └── docs/                     # Documentation
+└── scripts/                      # Automation scripts
+```
+
 ## Execution Order
 
 | # | Prompt | Target | Type |
 |---|--------|--------|------|
-| 0 | `00_context_sampler_python.prompt` | `pdd/context_sampler.py` | NEW FILE |
-| 1 | `01_extend_llm_invoke_return.change.prompt` | `pdd/llm_invoke.py` | MODIFY |
-| 2 | `02_preprocess_with_metadata.change.prompt` | `pdd/preprocess.py` | MODIFY |
-| 3 | `03_code_generator_instrumentation.change.prompt` | `pdd/code_generator.py` | MODIFY |
-| 3b | `03b_code_generator_main_instrumentation.change.prompt` | `pdd/code_generator_main.py` | MODIFY |
-| 4 | `04_sync_orchestration_sampler.change.prompt` | `pdd/sync_orchestration.py` | MODIFY |
+| 0 | `pdd_integration/prompts/context_sampler_python.prompt` | `pdd/context_sampler.py` | NEW FILE |
+| 0b | `pdd_integration/prompts/context_viz_python.prompt` | `pdd/context_viz.py` | NEW FILE |
+| 1 | `changes/01_extend_llm_invoke_return.change.prompt` | `pdd/llm_invoke.py` | MODIFY |
+| 2 | `changes/02_preprocess_with_metadata.change.prompt` | `pdd/preprocess.py` | MODIFY |
+| 3 | `changes/03_code_generator_instrumentation.change.prompt` | `pdd/code_generator.py` | MODIFY |
+| 3b | `changes/03b_code_generator_main_instrumentation.change.prompt` | `pdd/code_generator_main.py` | MODIFY |
+| 4 | `changes/04_sync_orchestration_sampler.change.prompt` | `pdd/sync_orchestration.py` | MODIFY |
 
 **Note:** `sync_main.py` does NOT need modification.
 
@@ -46,17 +68,19 @@ Since PDD's core modules don't have existing prompts, the workflow is:
 2. **Apply changes** using `pdd change`
 3. **Regenerate code** using `pdd generate`
 
-### Step 0: Create new context_sampler module
+### Step 0: Create new modules (context_sampler, context_viz)
 
 ```bash
 cd ~/pdd
 
-# Copy prompt and schema
-cp ~/pdd_context_viz/changes/00_context_sampler_python.prompt prompts/context_sampler_python.prompt
-cp ~/pdd_context_viz/context_map.schema.json prompts/context_map.schema.json
+# Copy prompts and schema
+cp ~/pdd_context_viz/pdd_integration/prompts/context_sampler_python.prompt prompts/
+cp ~/pdd_context_viz/pdd_integration/prompts/context_viz_python.prompt prompts/
+cp ~/pdd_context_viz/pdd_integration/prompts/context_map.schema.json prompts/
 
-# Generate new module
+# Generate new modules
 pdd generate context_sampler --language python
+pdd generate context_viz --language python
 ```
 
 ### Steps 1-4: Modify existing modules
@@ -85,10 +109,12 @@ pdd generate llm_invoke --language python
 ```bash
 cd ~/pdd
 
-# 0. New module
-cp ~/pdd_context_viz/changes/00_context_sampler_python.prompt prompts/context_sampler_python.prompt
-cp ~/pdd_context_viz/context_map.schema.json prompts/context_map.schema.json
+# 0. New modules
+cp ~/pdd_context_viz/pdd_integration/prompts/context_sampler_python.prompt prompts/
+cp ~/pdd_context_viz/pdd_integration/prompts/context_viz_python.prompt prompts/
+cp ~/pdd_context_viz/pdd_integration/prompts/context_map.schema.json prompts/
 pdd generate context_sampler --language python
+pdd generate context_viz --language python
 
 # 1. llm_invoke
 pdd update pdd/llm_invoke.py --output prompts/llm_invoke_python.prompt

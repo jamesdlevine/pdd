@@ -1,0 +1,71 @@
+<pdd>
+Target: pdd/context_viz.py (NEW FILE)
+
+Generate (run from ~/pdd after copying files):
+  # Copy prompt and schema to pdd prompts directory
+  cp ~/pdd_context_viz/pdd_integration/prompts/context_viz_python.prompt prompts/
+  cp ~/pdd_context_viz/pdd_integration/prompts/context_map.schema.json prompts/
+
+  # Generate the module
+  pdd generate context_viz --language python
+</pdd>
+
+CLI tool to visualize PDD context map JSON files.
+
+```context_map.schema.json```
+
+% Requirements
+
+1. Read context map JSON from file argument or stdin
+2. Provide two visualization modes: summary (default) and detailed (--detailed flag)
+3. Summary mode: 10x10 grid where each cell represents ~1% of total input
+4. Detailed mode: bar chart breakdowns of all metrics
+5. Show provenance info (prompt file, model, timestamp, duration)
+6. Handle missing optional fields gracefully
+
+% Summary Mode (Grid View)
+
+Display a 10x10 character grid with symbols representing input proportions:
+- ▣ PDD system prompt
+- ◆ Devunit prompt (bare, before preprocessing)
+- █ Disk file includes
+- ▓ Web includes
+- ⌘ Shell command outputs
+- • Variable substitutions
+- ◇ Few-shot examples
+- ▤ Prepend/append text (from PDD config)
+
+Grid order: PDD system → devunit → includes → web → shell → variables → few-shot → prepend/append
+
+Show legend beside grid with symbol, label, char count, and percentage.
+
+% Detailed Mode (Bar Charts)
+
+Show hierarchical breakdown:
+- INPUT/OUTPUT comparison
+- TOKENS section (if reported by provider): prompt_tokens, response_tokens
+- API STRUCTURE: system_prompt, user_message, assistant_prefill
+- PROMPT BREAKDOWN: devunit, prepended, appended, preprocessor total
+- PREPROCESSOR by type: include, shell, web, variable (with counts)
+- FEW-SHOT EXAMPLES: individual examples with pinned indicator and quality_score
+
+Use ASCII bar charts (█ and ░) for proportions.
+
+% CLI Interface
+
+```
+usage: context_viz.py [-h] [--detailed] [file]
+
+positional arguments:
+  file        JSON context map file (reads stdin if omitted)
+
+options:
+  --detailed  Show detailed breakdown instead of summary grid
+```
+
+% Formatting
+
+- Use K suffix for values >= 1000 (e.g., "12.5K")
+- Show percentages as integers (e.g., "15%")
+- Align columns for readability
+- Use box-drawing characters for visual separation in detailed mode
