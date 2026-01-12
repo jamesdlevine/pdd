@@ -1,18 +1,79 @@
 <pdd>
 Target: pdd/context_viz.py (NEW FILE)
 
-Generate (run from ~/pdd after copying files):
-  # Copy prompt and schema to pdd prompts directory
-  cp ~/pdd_context_viz/pdd_integration/prompts/context_viz_python.prompt prompts/
-  cp ~/pdd_context_viz/pdd_integration/prompts/context_map.schema.json prompts/
-
-  # Generate the module
+Generate:
   pdd generate context_viz --language python
+
+Depends on: context_map_models.py
 </pdd>
 
 CLI tool to visualize PDD context map JSON files.
 
-```context_map.schema.json```
+% Data Access
+
+Use the Pydantic models from context_map_models for all data access:
+
+```python
+from pdd.context_map_models import ContextMap
+
+# Load from file or stdin
+context = ContextMap.from_file(path) if path else ContextMap.from_json(stdin.read())
+
+# Access fields via typed attributes
+total_chars = context.input.total_chars
+model_name = context.provenance.model
+```
+
+Do NOT access data via raw dict keys. The ContextMap model handles validation and provides typed access.
+
+% Model Structure Reference
+
+The ContextMap model has this structure (use EXACT field names):
+
+```
+ContextMap:
+  provenance: Provenance
+    - timestamp_utc: str (ISO 8601)
+    - model: str
+    - provider: str
+    - prompt_file: str
+    - duration_ms: Optional[int] (milliseconds, NOT seconds)
+    - pdd_version: Optional[str]
+
+  input: Input
+    - total_chars: int
+    - api_structure: Optional[ApiStructure]
+        - system_prompt_chars: int = 0
+        - user_message_chars: int = 0
+        - assistant_prefill_chars: int = 0
+        - other_chars: int = 0
+    - prompt_breakdown: Optional[PromptBreakdown]
+        - pdd_system_prompt_chars: int = 0
+        - devunit_prompt_chars: int = 0
+        - prepended_chars: int = 0
+        - appended_chars: int = 0
+        - preprocessor_total_chars: int = 0
+        - preprocessor_items: List[PreprocessorItem]
+        - preprocessor_summary: PreprocessorSummary
+            - include_count, include_chars: int = 0
+            - shell_count, shell_chars: int = 0
+            - web_count, web_chars: int = 0
+            - variable_count, variable_chars: int = 0
+        - few_shot_examples: List[FewShotExample]
+            - example_id: str
+            - chars: int
+            - pinned: Optional[bool]
+            - quality_score: Optional[float] (0.0-1.0)
+        - few_shot_total_chars: int = 0
+
+  output: Output
+    - response_chars: int
+    - response_tokens_reported: Optional[int]
+    - response_tokens_estimated: Optional[int]
+    - prompt_tokens_reported: Optional[int]
+```
+
+IMPORTANT: Use `duration_ms` (milliseconds), NOT duration_seconds. Convert to seconds for display: `duration_ms / 1000`.
 
 % Requirements
 
@@ -21,7 +82,7 @@ CLI tool to visualize PDD context map JSON files.
 3. Summary mode: 10x10 grid where each cell represents ~1% of total input
 4. Detailed mode: bar chart breakdowns of all metrics
 5. Show provenance info (prompt file, model, timestamp, duration)
-6. Handle missing optional fields gracefully
+6. Handle missing optional fields gracefully (use model defaults)
 
 % Summary Mode (Grid View)
 

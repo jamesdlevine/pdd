@@ -1,60 +1,85 @@
 <pdd>
 Target: pdd/preprocess.py
 
-Prerequisites (run from ~/pdd):
-  # Generate prompt from existing code if it doesn't exist
-  pdd update pdd/preprocess.py --output prompts/preprocess_python.prompt
-
-Apply change (run from ~/pdd):
-  pdd change \
-    ~/pdd_context_viz/changes/02_preprocess_with_metadata.change.prompt \
-    pdd/preprocess.py \
-    prompts/preprocess_python.prompt \
+Apply (from ~/pdd):
+  pdd change ~/pdd_context_viz/changes/02_preprocess_with_metadata.change.prompt \
+    pdd/preprocess.py prompts/preprocess_python.prompt \
     --output prompts/preprocess_python.prompt
-
-Regenerate code:
-  pdd generate preprocess --language python
 </pdd>
 
-Add a new function `preprocess_with_metadata()` that returns both the expanded text and metadata about each preprocessor expansion.
+% Context Map Feature - Preprocessing Metadata
 
-% New Data Structures
+Add a variant of the preprocess function that returns metadata about each expansion.
 
-Add these dataclasses at the top of the module (after imports):
+% Required Changes
+
+Add a new function `preprocess_with_metadata` with the same signature as `preprocess`, returning a tuple:
+- The preprocessed prompt string (same as existing preprocess)
+- A `PreprocessMetadata` dataclass with itemized and summarized expansion data
+
+% PreprocessMetadata Structure
+
+Define a dataclass to hold the metadata:
 
 ```python
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
-
 @dataclass
 class PreprocessorItem:
-    """Metadata for a single preprocessor directive expansion."""
+    """A single preprocessor expansion."""
     type: str  # "include", "shell", "web", "variable"
-    source: str  # file path, command, url, or variable name
-    chars: int  # character count of expanded content
-    line_in_prompt: int  # line number where directive appeared
-    syntax: Optional[str] = None  # "directive" or "backticks" (for includes)
-    include_many: bool = False  # True if from <include-many>
+    chars: int  # Characters contributed by this expansion
+    line_in_prompt: Optional[int] = None  # Line number where directive appeared
+    # Type-specific fields:
+    source: Optional[str] = None  # For include: file path
+    syntax: Optional[str] = None  # For include: "directive" or "backticks"
+    include_many: bool = False  # For include: was this from <include-many>
+    command: Optional[str] = None  # For shell: the command executed
+    url: Optional[str] = None  # For web: the URL fetched
+    name: Optional[str] = None  # For variable: variable name
+
+@dataclass
+class PreprocessorSummary:
+    """Aggregated counts by type."""
+    include_count: int = 0
+    include_chars: int = 0
+    shell_count: int = 0
+    shell_chars: int = 0
+    web_count: int = 0
+    web_chars: int = 0
+    variable_count: int = 0
+    variable_chars: int = 0
 
 @dataclass
 class PreprocessMetadata:
-    """Aggregated metadata from preprocessing."""
-    items: List[PreprocessorItem] = field(default_factory=list)
-
-    @property
-    def summary(self) -> Dict[str, int]:
-        """Return aggregated counts by type."""
-        result = {}
-        for item_type in ["include", "shell", "web", "variable"]:
-            items_of_type = [i for i in self.items if i.type == item_type]
-            result[f"{item_type}_count"] = len(items_of_type)
-            result[f"{item_type}_chars"] = sum(i.chars for i in items_of_type)
-        return result
+    """Complete preprocessing metadata."""
+    items: List[PreprocessorItem]  # Individual expansions
+    summary: PreprocessorSummary  # Aggregated stats
+    total_chars: int = 0  # Total chars added by all expansions
 ```
 
-% New Function
+% Implementation Approach
 
-Add `preprocess_with_metadata()` that wraps the existing preprocessing logic but tracks metadata:
+Modify the internal processing functions to collect metadata:
+
+1. `process_include_tags`: When expanding `<include>path</include>`:
+   - Track the file path, line number, and resulting character count
+   - Record syntax as "directive"
+
+2. `process_backtick_includes`: When expanding `` ```<path>``` ``:
+   - Track the file path, line number, and resulting character count
+   - Record syntax as "backticks"
+
+3. `process_include_many_tags`: When expanding `<include-many>`:
+   - Track each file as a separate item with `include_many=True`
+
+4. `process_shell_tags`: When expanding `<shell>command</shell>`:
+   - Track the command and resulting character count
+
+5. `process_web_tags`: When expanding `<web>url</web>`:
+   - Track the URL and resulting character count
+
+After all processing, compute the summary totals.
+
+% Function Signature
 
 ```python
 def preprocess_with_metadata(
@@ -64,27 +89,13 @@ def preprocess_with_metadata(
     exclude_keys: Optional[List[str]] = None
 ) -> Tuple[str, PreprocessMetadata]:
     """
-    Preprocess a prompt and return both the expanded text and metadata.
+    Preprocess prompt and return metadata about expansions.
 
     Returns:
-        Tuple of (expanded_text, metadata)
+        Tuple of (processed_prompt, metadata)
     """
-    metadata = PreprocessMetadata()
-    # ... preprocessing with tracking ...
-    return expanded_text, metadata
 ```
-
-% Modification to Existing Functions
-
-Modify the internal `replace_*` functions to optionally track metadata:
-- `process_include_tags()` - track file path, chars, line number, syntax="directive"
-- `process_backtick_includes()` - track file path, chars, line number, syntax="backticks"
-- `process_include_many_tags()` - track each file with include_many=True
-- `process_shell_tags()` - track command, chars, line number
-- `process_web_tags()` - track url, chars, line number
-
-The line number can be calculated from: `prompt.count('\n', 0, match.start()) + 1`
 
 % Backward Compatibility
 
-The existing `preprocess()` function must remain unchanged. The new `preprocess_with_metadata()` is an additional function that callers can optionally use.
+The existing `preprocess` function remains unchanged. It can internally call `preprocess_with_metadata` and discard the metadata, or remain separate. The new function is additive.

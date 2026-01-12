@@ -4,236 +4,285 @@
 
 Add context map capture to `pdd generate`/`pdd sync` to log detailed metrics about each generation for analysis and visualization.
 
-## Key Files in PDD
+**Approach**: This plan follows Prompt-Driven Development principles. All changes are made by modifying prompts, then regenerating code. Prompts are the source of truth; generated code is ephemeral.
 
-| File | Role |
-|------|------|
-| `pdd/preprocess.py` | Expands `<include>`, `<shell>`, `<web>`, backticks, variables |
-| `pdd/code_generator_main.py` | CLI wrapper: handles cloud vs local, preprocessing, incremental |
-| `pdd/code_generator.py` | Core local generation: calls llm_invoke |
-| `pdd/llm_invoke.py` | Calls LiteLLM, captures tokens via callback in `_LAST_CALLBACK_DATA` |
-| `pdd/sync_main.py` | Entry point for `pdd sync`, iterates over languages (NO CHANGES) |
-| `pdd/sync_orchestration.py` | Per-language sync workflow, calls code_generator_main |
+## New Prompts to Create
 
-## Actual Data Flow
+### 1. `context_map_models_python.prompt` (NEW)
 
-```
-sync_main.py (NO CHANGES - just iterates languages)
-    → sync_orchestration.py (initialize sampler, finalize after)
-        → code_generator_main.py (preprocessing happens HERE, cloud path HERE)
-            ├─► [cloud path] → HTTP request (bypass code_generator.py)
-            └─► code_generator.py (local path)
-                    → llm_invoke() → {'result', 'cost', 'model_name', ...}
-```
+**Purpose**: Pydantic models matching the JSON schema. Single source of truth for data structures.
 
-**Critical insight**: `code_generator_main.py` does preprocessing BEFORE calling `code_generator.py`, and cloud execution bypasses `code_generator.py` entirely.
+**Location**: `pdd/prompts/context_map_models_python.prompt`
 
-## Implementation Steps
+**Key Requirements**:
+- Define models strictly matching `context_map.schema.json`
+- Export `ContextMap`, `Provenance`, `Input`, `Output`, nested models, and enums
+- Provide `ContextMap.generate_sample()` for testing
+- Convenience methods: `to_json()`, `from_file()`, `save()`
 
-### 1. Create `pdd/context_sampler.py` (NEW)
+**Dependencies**: `context_map.schema.json` (via backtick include)
 
-Storage layer implementing the schema. Key interface:
+**Prompt-to-Code Ratio**: ~20% (schema drives structure)
 
-```python
-class ContextSampler:
-    def __init__(self, output_path: str, max_samples: int = 5): ...
-    def start_generation(self, generation_id: str, prompt_file: str, model: str, provider: str): ...
-    def record_call(self, input_chars, output_chars, duration_ms, tokens...): ...
-    def record_prompt_breakdown(self, pdd_system_chars, devunit_chars, ...): ...
-    def finalize(self) -> str: ...
-```
+---
 
-### 2. Extend `pdd/preprocess.py`
+### 2. `context_sampler_python.prompt` (NEW)
 
-**Goal**: Return preprocessing metadata alongside expanded text.
+**Purpose**: Storage layer for context map data during generation.
 
-**Changes**:
-- Add `PreprocessMetadata` dataclass to track items
-- Modify `process_include_tags()`, `process_shell_tags()`, `process_web_tags()`, etc. to collect metadata
-- Add new function `preprocess_with_metadata()` that returns both text and metadata
-- Keep existing `preprocess()` unchanged for backward compatibility
+**Location**: `pdd/prompts/context_sampler_python.prompt`
 
-```python
-@dataclass
-class PreprocessorItem:
-    type: str  # "include", "shell", "web", "variable"
-    source: str  # file path, command, url, or var name
-    chars: int
-    line_in_prompt: int
-    syntax: Optional[str] = None  # "directive" or "backticks" for includes
-    include_many: bool = False
+**Key Requirements**:
+- Accept `ContextMap` instances and persist to JSON
+- Store in `.pdd_context/` directory alongside output
+- File naming: `<basename>.context.<N>.json` with monotonic N
+- Retention: keep most recent N files (default 5)
+- CLI `--sample` flag outputs example via `ContextMap.generate_sample()`
 
-@dataclass
-class PreprocessMetadata:
-    items: List[PreprocessorItem]
-    summary: Dict[str, int]  # {include_count, include_chars, shell_count, ...}
+**Dependencies**: `context_map_models` (import models)
 
-def preprocess_with_metadata(prompt: str, ...) -> Tuple[str, PreprocessMetadata]:
-    # New function that tracks all expansions
-    ...
-```
+**Contracts**:
+- Input: ContextMap instance
+- Output: path to written file, or None on error
+- Invariant: file count per devunit ≤ configured maximum
 
-### 3. Extend `pdd/llm_invoke.py` return value
+---
+
+### 3. `context_viz_python.prompt` (NEW)
+
+**Purpose**: CLI visualization of context map JSON files.
+
+**Location**: `pdd/prompts/context_viz_python.prompt`
+
+**Key Requirements**:
+- Read JSON from file argument or stdin
+- Two modes: summary (10x10 grid) and detailed (bar charts)
+- Summary grid symbols: ▣ PDD system, ◆ devunit, █ includes, ▓ web, ⌘ shell, • variables, ◇ few-shot, ▤ prepend/append
+- Show provenance (prompt file, model, timestamp, duration)
+
+**Dependencies**: `context_map_models` (import `ContextMap`)
+
+---
+
+## Existing Prompts to Modify
+
+### 4. `llm_invoke_python.prompt` (MODIFY)
 
 **Goal**: Expose token counts and duration in return dict.
 
-**Changes** (minimal):
-- Add timing around litellm call (already has `start_time`/`end_time` locally)
-- Extend return dict:
-
-```python
-return {
-    'result': final_result,
-    'cost': total_cost,
-    'model_name': model_name_litellm,
-    'thinking_output': final_thinking,
-    # NEW:
-    'input_tokens': _LAST_CALLBACK_DATA.get("input_tokens", 0),
-    'output_tokens': _LAST_CALLBACK_DATA.get("output_tokens", 0),
-    'duration_ms': int((end_time - start_time) * 1000),
-    'provider': provider_name,  # extract from model_info
-}
+**Add to "Output (dictionary)" section**:
+```
+% Output (dictionary):
+    - 'result': String or Pydantic object (or list if batch mode).
+    - 'cost': Total cost via LiteLLM callback.
+    - 'model_name': Name of the selected model.
+    - 'thinking_output': Reasoning output if available.
+    # NEW fields:
+    - 'input_tokens': Prompt tokens from callback (0 if unavailable).
+    - 'output_tokens': Completion tokens from callback (0 if unavailable).
+    - 'duration_ms': API call duration in milliseconds.
+    - 'provider': Provider name extracted from model info.
 ```
 
-### 4. Modify `pdd/code_generator_main.py` (CRITICAL)
+**Behavioral change**: Return dict includes timing and token metadata for downstream instrumentation.
 
-**Goal**: Instrument preprocessing and record metrics for BOTH cloud and local paths.
+---
 
-This is where preprocessing actually happens. The function:
-1. Reads and preprocesses the prompt
-2. Either sends to cloud OR calls `code_generator.py`
-3. Handles the response
+### 5. `preprocess_python.prompt` (MODIFY)
 
-**Changes**:
+**Goal**: Return preprocessing metadata alongside expanded text.
 
-```python
-def code_generator_main(ctx, prompt_file, output, ..., context_sampler=None):
-    # Measure raw devunit prompt BEFORE preprocessing
-    devunit_chars = len(prompt_content)
+**Add new section**:
+```
+% Metadata Collection Mode
 
-    # Use preprocess_with_metadata when sampler provided
-    if context_sampler:
-        processed, preprocess_meta = preprocess_with_metadata(prompt_content, ...)
-    else:
-        processed = pdd_preprocess(prompt_content, ...)
-        preprocess_meta = None
+When called via `preprocess_with_metadata()`:
+- Return tuple: (expanded_text, PreprocessMetadata)
+- Track each directive processed: type, source/command/url/name, chars produced, line number
+- Compute summary: counts and char totals by type (include, shell, web, variable)
+- Original `preprocess()` remains unchanged for backward compatibility
 
-    # ... cloud or local execution ...
-
-    # Record metrics (works for both cloud and local paths)
-    if context_sampler:
-        context_sampler.record_call(
-            input_chars=len(processed),
-            output_chars=len(generated_code_content),
-            duration_ms=response.get('duration_ms', 0),
-            prompt_tokens_reported=response.get('input_tokens'),
-            response_tokens_reported=response.get('output_tokens'),
-        )
-        if preprocess_meta:
-            context_sampler.record_prompt_breakdown(
-                devunit_prompt_chars=devunit_chars,
-                preprocessor_items=preprocess_meta.items,
-            )
+% PreprocessMetadata Structure
+- items: List of PreprocessorItem (type, source, chars, line_in_prompt, syntax, include_many)
+- summary: Dict with {type}_count and {type}_chars for each preprocessor type
 ```
 
-### 5. Modify `pdd/code_generator.py` (minimal)
-
-**Goal**: Pass through extended return from llm_invoke.
-
-Since preprocessing happens in `code_generator_main.py`, this function just needs to:
-1. Accept optional `context_sampler` parameter
-2. Pass through extended fields from `llm_invoke()` return
-
+**New function signature**:
 ```python
-def code_generator(prompt, language, strength, ..., context_sampler=None):
-    # ... existing code ...
-    response = llm_invoke(...)
-
-    # Optionally record if sampler provided (for direct calls not via code_generator_main)
-    if context_sampler:
-        context_sampler.record_call(...)
-
-    return response['result'], response['cost'], response['model_name']
+def preprocess_with_metadata(prompt: str, ...) -> Tuple[str, PreprocessMetadata]
 ```
 
-### 6. Wire up in `pdd/sync_orchestration.py`
+---
 
-**Goal**: Initialize sampler and finalize after generation.
+### 6. `code_generator_main_python.prompt` (MODIFY)
 
-**Changes**:
+**Goal**: Instrument preprocessing and record metrics for both cloud and local paths.
 
-```python
-from .context_sampler import ContextSampler
+**Add new section**:
+```
+% Context Sampling (Optional)
 
-def sync_orchestration(...):
-    # Initialize sampler
-    sampler = ContextSampler(
-        output_path=code_output_path,
-        max_samples=config.get('context_samples', 5)
-    )
-    generation_id = str(uuid.uuid4())
-    sampler.start_generation(generation_id, prompt_file, model, provider)
+When `context_sampler` parameter is provided:
+1. Measure raw devunit prompt chars BEFORE preprocessing
+2. Call `preprocess_with_metadata()` instead of `preprocess()` to capture directive metadata
+3. After LLM response, record metrics via sampler:
+   - input_chars, output_chars, duration_ms
+   - prompt_tokens_reported, response_tokens_reported (from llm_invoke return)
+   - preprocessor_items from metadata
+4. Works for BOTH cloud and local execution paths
 
-    # Call code_generator_main with sampler
-    result = code_generator_main(
-        ctx=ctx,
-        prompt_file=str(pdd_files['prompt'].resolve()),
-        output=str(pdd_files['code'].resolve()),
-        ...,
-        context_sampler=sampler,
-    )
-
-    # Finalize
-    context_path = sampler.finalize()
-    if not quiet:
-        console.print(f"[dim]Context saved: {context_path}[/dim]")
+% Function Signature Addition
+Add optional parameter:
+    context_sampler: Optional[ContextSampler] = None
 ```
 
-### 7. Add config option
+**Behavioral change**: When sampler provided, captures comprehensive metrics without changing generation behavior.
+
+---
+
+### 7. `code_generator_python.prompt` (MODIFY)
+
+**Goal**: Pass through extended return fields from `llm_invoke`.
+
+**Minimal change to "Outputs" section**:
+```
+% Outputs:
+    'runnable_code' - A string that is runnable code
+    'total_cost' - A float that is the total cost
+    'model_name' - A string that is the model name
+    # Pass through from llm_invoke (when available):
+    'input_tokens', 'output_tokens', 'duration_ms', 'provider'
+```
+
+**Note**: These fields flow through from `llm_invoke()` return dict. No new logic needed.
+
+---
+
+### 8. `sync_orchestration_python.prompt` (MODIFY)
+
+**Goal**: Initialize sampler at workflow start, finalize after generation.
+
+**Add to "Dependencies" section**:
+```
+<context_sampler_example>
+    <include>context/context_sampler_example.py</include>
+</context_sampler_example>
+```
+
+**Add new section**:
+```
+% Context Sampling Integration
+
+When context sampling is enabled (via config):
+1. At workflow start: Initialize ContextSampler with output path
+2. Generate unique generation_id (UUID)
+3. Pass sampler to code_generator_main()
+4. After generation: Call sampler.finalize() to write context file
+5. Log context file path (unless quiet mode)
+
+Configuration:
+- context_sampling: bool (default true) - enable/disable
+- context_samples: int (default 5) - max files to retain
+```
+
+---
+
+## Prompt Dependency Graph
+
+```
+context_map.schema.json (canonical schema)
+         │
+         ▼
+context_map_models_python.prompt (Pydantic models)
+         │
+    ┌────┴────┐
+    ▼         ▼
+context_sampler    context_viz
+    │
+    ▼
+preprocess (add metadata mode)
+    │
+    ▼
+code_generator_main (instrumentation)
+    │
+    ▼
+sync_orchestration (wire up sampler)
+```
+
+## Generation Order
+
+Run `pdd generate` in this order to respect dependencies:
+
+```bash
+# 1. New modules (no existing code to break)
+pdd generate context_map_models --language python
+pdd generate context_sampler --language python
+pdd generate context_viz --language python
+
+# 2. Modified modules (regenerate with new requirements)
+pdd generate llm_invoke --language python
+pdd generate preprocess --language python
+pdd generate code_generator --language python
+pdd generate code_generator_main --language python
+pdd generate sync_orchestration --language python
+```
+
+## Context Files to Create
+
+Each modified prompt needs a context example file for the `<include>` directive:
+
+| File | Purpose |
+|------|---------|
+| `context/context_sampler_example.py` | Shows ContextSampler usage pattern |
+| `context/preprocess_metadata_example.py` | Shows preprocess_with_metadata() usage |
+
+## Testing Strategy
+
+1. **Schema compliance**: `python -c "from pdd.context_map_models import ContextMap; print(ContextMap.generate_sample().to_json())"`
+2. **Sampler CLI**: `python -m pdd.context_sampler --sample > test.json && python -m pdd.context_viz test.json`
+3. **Integration**: Run `pdd sync` on a test prompt, verify `.pdd_context/` files created
+4. **Visualization**: Pipe sample through viz: `python -m pdd.context_sampler --sample | python -m pdd.context_viz`
+
+## Configuration
 
 **In `.pddrc`**:
 ```yaml
 defaults:
-  context_sampling: true   # Enable/disable
-  context_samples: 5       # Max samples to retain
+  context_sampling: true   # Enable/disable context capture
+  context_samples: 5       # Max context files to retain per devunit
 ```
 
-## File Changes Summary
+**Environment override**: `PDD_CONTEXT_SAMPLING=0` disables capture.
+
+## Files Summary
 
 | File | Type | Description |
 |------|------|-------------|
-| `pdd/context_sampler.py` | NEW | Storage layer implementation |
-| `pdd/preprocess.py` | MODIFY | Add `preprocess_with_metadata()`, track items |
-| `pdd/llm_invoke.py` | MODIFY | Add tokens/duration to return dict (~5 lines) |
-| `pdd/code_generator_main.py` | MODIFY | Main instrumentation: preprocessing metadata, metrics |
-| `pdd/code_generator.py` | MODIFY | Pass through extended llm_invoke return |
-| `pdd/sync_orchestration.py` | MODIFY | Initialize/finalize sampler |
-| `pdd/sync_main.py` | NO CHANGE | Just iterates languages |
-| `.pddrc` schema | MODIFY | Add context_sampling options |
+| `prompts/context_map_models_python.prompt` | NEW | Pydantic models from schema |
+| `prompts/context_sampler_python.prompt` | NEW | Storage layer with CLI |
+| `prompts/context_viz_python.prompt` | NEW | Visualization CLI |
+| `prompts/llm_invoke_python.prompt` | MODIFY | Add token/duration to return |
+| `prompts/preprocess_python.prompt` | MODIFY | Add metadata collection mode |
+| `prompts/code_generator_python.prompt` | MODIFY | Pass through extended fields |
+| `prompts/code_generator_main_python.prompt` | MODIFY | Main instrumentation point |
+| `prompts/sync_orchestration_python.prompt` | MODIFY | Wire up sampler lifecycle |
+| `context/context_sampler_example.py` | NEW | Usage example for includes |
+| `context_map.schema.json` | EXISTING | Canonical JSON schema |
 
-## Data Capture Points
+## Prompt Writing Guidelines
 
-| Data | Location | How |
-|------|----------|-----|
-| `generation_id` | sync_orchestration | Generate UUID |
-| `timestamp_utc` | context_sampler.start_generation | `datetime.utcnow()` |
-| `duration_ms` | llm_invoke | `end_time - start_time` |
-| `model`, `provider` | llm_invoke return | Already available |
-| `prompt_file` | sync_orchestration | Passed from CLI |
-| `devunit_prompt_chars` | code_generator_main | `len(prompt)` before preprocess |
-| `preprocessor_items` | preprocess_with_metadata | Track each expansion |
-| `input_tokens`, `output_tokens` | llm_invoke | From `_LAST_CALLBACK_DATA` |
-| `response_chars` | code_generator_main | `len(generated_code_content)` |
+When modifying prompts, follow PDD principles:
 
-## Testing Strategy
+1. **Behavioral, not procedural**: Describe WHAT the code should do, not HOW
+2. **Testable requirements**: Each requirement should map to a test case
+3. **10-30% ratio**: Prompt should be 10-30% of expected code size
+4. **Use includes**: Reference dependencies via `<include>` tags
+5. **Avoid duplication**: Don't repeat what's in preamble or grounding
+6. **Positive constraints**: "Return empty dict on error" not "Don't throw exceptions"
 
-1. Unit tests for `context_sampler.py` (file operations, retention)
-2. Unit tests for `preprocess_with_metadata()` (metadata accuracy)
-3. Integration test: run `pdd sync` and verify `.pdd_context/` files created
-4. Verify JSON validates against schema
+## Rollback Strategy
 
-## Optional Enhancements
-
-1. **Environment variable toggle**: `PDD_CONTEXT_SAMPLING=0` to disable
-2. **Verbose output**: Show context summary after generation
-3. **Sampling rate**: For high-volume, sample 1-in-N generations
+If regenerated code breaks:
+1. Prompts are version-controlled - revert prompt changes
+2. Regenerate from previous prompt version
+3. Tests catch regressions before merge

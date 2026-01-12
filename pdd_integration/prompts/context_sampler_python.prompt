@@ -1,46 +1,180 @@
 <pdd>
 Target: pdd/context_sampler.py (NEW FILE)
 
-Generate (run from ~/pdd after copying files):
-  # Copy prompt and schema to pdd prompts directory
-  cp ~/pdd_context_viz/pdd_integration/prompts/context_sampler_python.prompt prompts/
-  cp ~/pdd_context_viz/pdd_integration/prompts/context_map.schema.json prompts/
-
-  # Generate the new module
+Generate:
   pdd generate context_sampler --language python
+
+Depends on: context_map_models.py
 </pdd>
 
-Storage layer for context map data collected during `pdd generate` operations.
+Storage and accumulation layer for context map data collected during `pdd generate` operations.
 
-```context_map.schema.json```
+% Data Models
+
+Use the Pydantic models from context_map_models for all data structures:
+
+```python
+from pdd.context_map_models import (
+    ContextMap, Provenance, Input, Output,
+    ApiStructure, PromptBreakdown, PreprocessorItem,
+    PreprocessorSummary, PreprocessorSummaryExtra, FewShotExample,
+    PreprocessorType, IncludeSyntax, SCHEMA_VERSION,
+)
+```
+
+Do NOT use raw dicts or custom dataclasses. The ContextMap models ensure schema compliance.
+
+% Architecture
+
+Two classes work together:
+
+1. **ContextSampler**: Builder class that accumulates data during generation, then builds a ContextMap
+2. **ContextStore**: Persistence class that handles file naming, rotation, and retention
+
+% ContextSampler Class (Builder Pattern)
+
+The sampler accumulates data from different points during generation:
+
+```python
+class ContextSampler:
+    def __init__(self, output_file_path: str, prompt_file: str, retention_limit: int = 5):
+        """Initialize sampler for a generation run."""
+        # Generates generation_id (UUID), records start timestamp
+        # Creates internal ContextStore for persistence
+
+    def record_raw_prompt(self, raw_prompt_chars: int) -> None:
+        """Record devunit prompt size before preprocessing."""
+
+    def record_preprocessing(self, metadata: 'PreprocessMetadata') -> None:
+        """Record preprocessing results (items, summary, total chars)."""
+
+    def record_llm_call(self,
+                        model: str,
+                        provider: str,
+                        input_tokens: int,
+                        output_tokens: int,
+                        duration_ms: int) -> None:
+        """Record metrics from an LLM invocation. Accumulates across multiple calls."""
+
+    def record_few_shot(self, examples: List[FewShotExample]) -> None:
+        """Record few-shot examples (from cloud grounding)."""
+
+    def finalize(self,
+                 generated_code: str,
+                 success: bool = True,
+                 pdd_version: Optional[str] = None) -> Optional[Path]:
+        """Build ContextMap from accumulated data and save via ContextStore.
+
+        Returns path to saved file, or None on error.
+        """
+```
+
+% PreprocessMetadata Structure
+
+The sampler expects preprocessing metadata in this structure:
+
+```python
+@dataclass
+class PreprocessMetadata:
+    """Metadata returned by preprocess_with_metadata()."""
+    items: List[PreprocessorItem]  # Individual include/shell/web/variable items
+    summary: PreprocessorSummary   # Aggregated counts and chars by type
+    summary_extra: Optional[PreprocessorSummaryExtra] = None  # include_many stats
+    total_chars: int = 0  # Total chars added by preprocessing
+```
+
+This structure maps directly to PromptBreakdown fields in the schema.
+
+% ContextStore Class (Persistence)
+
+Manages file storage with rotation:
+
+```python
+class ContextStore:
+    def __init__(self, output_file_path: str, retention_limit: int = 5):
+        """Initialize store for a specific output file (devunit)."""
+
+    def save(self, context_map: ContextMap) -> Optional[Path]:
+        """Persist a ContextMap to disk with rotation logic."""
+```
 
 % Requirements
 
-1. Accept context data matching the schema and persist to JSON files
-2. Support multiple LLM calls per generation; accumulate duration and token counts, keep final char counts
+1. ContextSampler accumulates data incrementally during generation
+2. Support multiple LLM calls per generation; accumulate duration and token counts
 3. Store context files in `.pdd_context/` directory alongside the output file
 4. Name files as `<output_basename>.context.<N>.json` where N increases monotonically from 1
 5. Retain only the most recent N context files per devunit (default N=5)
 6. When retention limit reached, delete the lowest-numbered file before writing
 7. Sequence gaps from deletion are acceptable; never renumber existing files
 8. Handle errors gracefully: log warnings but never fail the generation
+9. Provide a CLI command `--example` that outputs a sample context file using ContextMap.generate_sample()
 
 % Contracts
 
-- Input: all fields defined in the JSON schema (required and optional)
-- Output: path to written context file, or None on error
-- Written files must validate against the schema
+- ContextSampler.finalize() builds a complete ContextMap and returns saved path
+- ContextStore.save() takes a complete ContextMap and persists it
+- Written files validate against the schema (guaranteed by Pydantic)
 
 % Invariants
 
 - A generation_id maps to exactly one context file
-- Context files are valid JSON matching schema_version "1.0"
+- Context files are valid JSON matching SCHEMA_VERSION
 - File count per devunit never exceeds configured maximum
+- Sampler can be finalized only once
+
+% CLI Interface
+
+```
+usage: context_sampler.py [-h] [--example] [--output PATH]
+
+options:
+  --example   Output an example context map to stdout (or --output file)
+  --output    Write to file instead of stdout
+```
+
+% Integration Usage
+
+```python
+# In code_generator_main or sync_orchestration:
+
+# 1. Initialize at start of generation
+sampler = ContextSampler(
+    output_file_path=resolved_output,
+    prompt_file=prompt_file,
+    retention_limit=5
+)
+
+# 2. Record raw prompt size
+sampler.record_raw_prompt(len(raw_prompt_content))
+
+# 3. After preprocessing
+text, metadata = preprocess_with_metadata(prompt_content, ...)
+sampler.record_preprocessing(metadata)
+
+# 4. After each LLM call
+result = llm_invoke(...)
+sampler.record_llm_call(
+    model=result['model_name'],
+    provider=result['provider'],
+    input_tokens=result['input_tokens'],
+    output_tokens=result['output_tokens'],
+    duration_ms=result['duration_ms']
+)
+
+# 5. Finalize after generation complete
+context_path = sampler.finalize(
+    generated_code=generated_code_content,
+    success=True,
+    pdd_version="2.1.0"
+)
+```
 
 % Implementation Notes
 
-- Use `dataclasses` for internal state management
-- Use `datetime.utcnow().isoformat() + 'Z'` for timestamps
+- Use ContextMap.save() for writing files (handles JSON serialization)
 - Use `pathlib.Path` for file operations
 - Log warnings via `logging.getLogger(__name__)` - never print directly
-- The `finalize()` method computes summary fields before writing
+- ContextSampler holds mutable state; ContextMap is immutable once built
+- Default provider to "unknown" if not provided
+- Generate timestamp at init time, not at finalize time

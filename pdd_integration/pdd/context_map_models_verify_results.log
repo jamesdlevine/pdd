@@ -1,0 +1,29 @@
+<InitialState timestamp="2026-01-12T05:08:35.409727">
+  <ProgramFile>/home/james/pdd_context_viz/pdd_integration/examples/context_map_models_example.py</ProgramFile>
+  <CodeFile>/home/james/pdd_context_viz/pdd_integration/pdd/context_map_models.py</CodeFile>
+  <ExitCode>0</ExitCode>
+  <Output>
+--- Generating Sample Data ---
+Generated sample for model: gpt-4-turbo
+Saved sample to: output/sample_context_map.json
+--- Creating Manual Context Map ---
+Successfully created ContextMap with ID: 21b24c3d-6ebc-4a5d-b031-d5d93773a9d2
+Dictionary keys: ['schema_version', 'generation_id', 'provenance', 'input', 'output']
+
+--- Loading from File ---
+Loaded ID: e04332a8-1ef3-420a-945e-23992afa1b51
+Original ID: e04332a8-1ef3-420a-945e-23992afa1b51
+Verification successful: Loaded ID matches original.
+
+--- Accessing Nested Data ---
+Total preprocessor chars: 7550
+Number of items processed: 5
+  Item 1: Type=include, Chars=1500
+    Source: src/main.py
+  Item 2: Type=include, Chars=800
+    Source: src/utils.py
+  Item 3: Type=shell, Chars=200
+  Item 4: Type=web, Chars=5000
+  Item 5: Type=variable, Chars=50
+</Output>
+</InitialState>

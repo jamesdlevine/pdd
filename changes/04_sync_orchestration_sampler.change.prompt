@@ -1,84 +1,96 @@
 <pdd>
 Target: pdd/sync_orchestration.py
 
-Prerequisites (run from ~/pdd):
-  # Generate prompt from existing code if it doesn't exist
-  pdd update pdd/sync_orchestration.py --output prompts/sync_orchestration_python.prompt
-
-Apply change (run from ~/pdd):
-  pdd change \
-    ~/pdd_context_viz/changes/04_sync_orchestration_sampler.change.prompt \
-    pdd/sync_orchestration.py \
-    prompts/sync_orchestration_python.prompt \
+Apply (from ~/pdd):
+  pdd change ~/pdd_context_viz/changes/04_sync_orchestration_sampler.change.prompt \
+    pdd/sync_orchestration.py prompts/sync_orchestration_python.prompt \
     --output prompts/sync_orchestration_python.prompt
-
-Regenerate code:
-  pdd generate sync_orchestration --language python
 </pdd>
 
-Add context sampler initialization and finalization to the sync orchestration workflow.
+% Context Map Feature - Sync Orchestration Integration
 
-% Changes Required
+Add context sampler lifecycle management to the sync orchestration workflow.
 
-1. Add import at top of file:
-   ```python
-   import uuid
-   from .context_sampler import ContextSampler
-   ```
+% Required Changes
 
-2. Add config option check (context sampling can be disabled):
-   ```python
-   context_sampling_enabled = context_config.get('context_sampling', True)
-   max_context_samples = context_config.get('context_samples', 5)
-   ```
+Integrate ContextSampler into the sync workflow:
 
-3. Before calling code_generator, initialize the sampler if enabled:
-   ```python
-   sampler = None
-   if context_sampling_enabled:
-       sampler = ContextSampler(
-           output_path=code_output_path,
-           max_samples=max_context_samples
-       )
-       generation_id = str(uuid.uuid4())
-       sampler.start_generation(
-           generation_id=generation_id,
-           prompt_file=str(prompt_file_path),
-           model=model_name or "unknown",
-           provider="unknown",  # Will be updated after first LLM call
-       )
-   ```
+% Import
 
-4. Pass sampler to code_generator:
-   ```python
-   result, cost, model = code_generator(
-       prompt=prompt_content,
-       language=language,
-       strength=strength,
-       temperature=temperature,
-       time=time_param,
-       verbose=verbose,
-       context_sampler=sampler,  # NEW
-   )
-   ```
+Add import for the context sampler:
 
-5. After code_generator returns successfully, finalize the sampler:
-   ```python
-   if sampler:
-       try:
-           context_path = sampler.finalize()
-           if verbose and not quiet:
-               console.print(f"[dim]Context saved: {context_path}[/dim]")
-       except Exception as e:
-           # Non-fatal: log warning but don't fail the sync
-           if verbose:
-               console.print(f"[yellow]Warning: Failed to save context: {e}[/yellow]")
-   ```
+```python
+from .context_sampler import ContextSampler
+```
+
+% Configuration
+
+Add context sampling settings to the resolved config:
+
+```python
+# In config or as constants
+CONTEXT_SAMPLING_ENABLED = True  # Can be overridden by PDD_CONTEXT_SAMPLING=0
+CONTEXT_SAMPLES_RETENTION = 5    # Max context files to keep per devunit
+```
+
+Check environment for override:
+```python
+import os
+context_sampling_enabled = os.environ.get('PDD_CONTEXT_SAMPLING', '1') != '0'
+```
+
+% Sampler Lifecycle
+
+In the `sync_worker_logic` function, around the 'generate' operation:
+
+```python
+elif operation == 'generate':
+    pdd_files['code'].parent.mkdir(parents=True, exist_ok=True)
+
+    # Initialize sampler if context sampling enabled
+    sampler = None
+    if context_sampling_enabled:
+        try:
+            sampler = ContextSampler(
+                output_file_path=str(pdd_files['code'].resolve()),
+                prompt_file=str(pdd_files['prompt'].resolve()),
+                retention_limit=CONTEXT_SAMPLES_RETENTION
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize context sampler: {e}")
+            sampler = None
+
+    # Pass sampler to code_generator_main
+    result = code_generator_main(
+        ctx,
+        prompt_file=str(pdd_files['prompt'].resolve()),
+        output=str(pdd_files['code'].resolve()),
+        original_prompt_file_path=None,
+        force_incremental_flag=False,
+        context_sampler=sampler  # NEW PARAMETER
+    )
+
+    # Finalize sampler after successful generation
+    if sampler and result[0]:  # result[0] is generated_code
+        try:
+            context_path = sampler.finalize(
+                generated_code=result[0],
+                success=True,
+                pdd_version=pdd.__version__ if hasattr(pdd, '__version__') else None
+            )
+            if context_path and not quiet:
+                console.print(f"[dim]Context map: {context_path}[/dim]")
+        except Exception as e:
+            logger.warning(f"Failed to finalize context sampler: {e}")
+```
 
 % Error Handling
 
-Context sampling should never cause sync to fail. All sampler operations should be wrapped in try/except with warnings logged but exceptions suppressed.
+Context sampling is non-critical:
+- Wrap sampler creation in try/except
+- Wrap sampler.finalize() in try/except
+- Log warnings but never raise exceptions that would fail the sync
 
 % Backward Compatibility
 
-When `context_sampling` config option is False or missing, no sampler is created and behavior is unchanged.
+When context sampling is disabled via environment variable (`PDD_CONTEXT_SAMPLING=0`), no sampler is created and behavior is unchanged. The `context_sampler` parameter to `code_generator_main` will be None.

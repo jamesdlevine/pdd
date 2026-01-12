@@ -1,73 +1,51 @@
 <pdd>
 Target: pdd/llm_invoke.py
 
-Prerequisites (run from ~/pdd):
-  # Generate prompt from existing code if it doesn't exist
-  pdd update pdd/llm_invoke.py --output prompts/llm_invoke_python.prompt
-
-Apply change (run from ~/pdd):
-  pdd change \
-    ~/pdd_context_viz/changes/01_extend_llm_invoke_return.change.prompt \
-    pdd/llm_invoke.py \
-    prompts/llm_invoke_python.prompt \
+Apply (from ~/pdd):
+  pdd change ~/pdd_context_viz/changes/01_extend_llm_invoke_return.change.prompt \
+    pdd/llm_invoke.py prompts/llm_invoke_python.prompt \
     --output prompts/llm_invoke_python.prompt
-
-Regenerate code:
-  pdd generate llm_invoke --language python
 </pdd>
 
-Extend the return dictionary from `llm_invoke()` to include token counts and duration.
+% Context Map Feature - LLM Invoke Extensions
 
-% Changes Required
+Extend the llm_invoke return dictionary to include additional metrics needed for context map capture.
 
-1. Add these fields to the return dictionary at all return points:
-   - `input_tokens`: from `_LAST_CALLBACK_DATA.get("input_tokens", 0)`
-   - `output_tokens`: from `_LAST_CALLBACK_DATA.get("output_tokens", 0)`
-   - `duration_ms`: calculated from existing `start_time` and `end_time` variables
-   - `provider`: extracted from the model info or model name prefix
+% Required Changes to Output Dictionary
 
-2. The existing return structure is:
-   ```python
-   return {
-       'result': final_result,
-       'cost': total_cost,
-       'model_name': model_name_litellm,
-       'thinking_output': final_thinking,
-   }
-   ```
+The current return dictionary has: `result`, `cost`, `model_name`, `thinking_output`.
 
-3. The new return structure should be:
-   ```python
-   return {
-       'result': final_result,
-       'cost': total_cost,
-       'model_name': model_name_litellm,
-       'thinking_output': final_thinking,
-       'input_tokens': _LAST_CALLBACK_DATA.get("input_tokens", 0),
-       'output_tokens': _LAST_CALLBACK_DATA.get("output_tokens", 0),
-       'duration_ms': int((end_time - start_time) * 1000),
-       'provider': _extract_provider(model_name_litellm),
-   }
-   ```
+Add these four new fields:
 
-4. Add a helper function to extract provider from model name:
-   ```python
-   def _extract_provider(model_name: str) -> str:
-       """Extract provider name from model identifier."""
-       if '/' in model_name:
-           return model_name.split('/')[0]
-       prefixes = ['claude', 'gpt', 'o1', 'o3', 'gemini', 'llama']
-       for prefix in prefixes:
-           if model_name.lower().startswith(prefix):
-               if prefix in ['claude']:
-                   return 'anthropic'
-               if prefix in ['gpt', 'o1', 'o3']:
-                   return 'openai'
-               if prefix == 'gemini':
-                   return 'google'
-       return 'unknown'
-   ```
+1. `input_tokens` (int): Prompt token count from `_LAST_CALLBACK_DATA["input_tokens"]`
+2. `output_tokens` (int): Completion token count from `_LAST_CALLBACK_DATA["output_tokens"]`
+3. `duration_ms` (int): Total invocation time in milliseconds (measure with `time.time()` before/after the LLM call)
+4. `provider` (str): Provider name extracted from the model identifier (e.g., "openai" from "openai/gpt-4")
+
+% Implementation Notes
+
+- Token counts are already tracked in `_LAST_CALLBACK_DATA` by the success callback
+- For duration, wrap the completion call with timing: `start = time.time()` ... `duration_ms = int((time.time() - start) * 1000)`
+- For provider extraction, parse from model name string (split on "/" or use LiteLLM's model info)
+- Default to 0 for tokens if callback data unavailable
+- Default to "unknown" for provider if extraction fails
+
+% Updated Return Dictionary
+
+```python
+return {
+    'result': final_result,
+    'cost': total_cost,
+    'model_name': model_name_litellm,
+    'thinking_output': final_thinking if final_thinking else None,
+    # New fields for context map:
+    'input_tokens': _LAST_CALLBACK_DATA.get("input_tokens", 0),
+    'output_tokens': _LAST_CALLBACK_DATA.get("output_tokens", 0),
+    'duration_ms': duration_ms,
+    'provider': provider,
+}
+```
 
 % Backward Compatibility
 
-This change is additive - existing code that reads `result`, `cost`, `model_name`, `thinking_output` will continue to work. New code can optionally access the additional fields.
+This change is additive. Existing callers that only access `result`, `cost`, `model_name`, or `thinking_output` continue to work unchanged.

@@ -1,273 +1,287 @@
 #!/usr/bin/env python3
-"""Generate text visualization of PDD context maps."""
-
-import json
 import sys
-from typing import Any
+import argparse
+import math
+from typing import List, Tuple, Optional
+from datetime import datetime
 
-# Grid symbols
-SYM_FILLED = "⛁"
-SYM_HALF = "⛀"
-SYM_EMPTY = "⛶"
+# Assuming the models are available in the python path as specified
+try:
+    from pdd.context_map_models import ContextMap
+except ImportError:
+    print("Error: Could not import 'pdd.context_map_models'. Ensure the package is installed or in PYTHONPATH.", file=sys.stderr)
+    sys.exit(1)
 
+# --- Formatting Helpers ---
 
-def format_chars(chars: int) -> str:
-    """Format character count with K suffix for readability."""
-    if chars >= 1000:
-        return f"{chars / 1000:.1f}K"
-    return str(chars)
+def format_chars(count: int) -> str:
+    """Formats numbers with K suffix for thousands."""
+    if count >= 1000:
+        return f"{count/1000:.1f}K"
+    return str(count)
 
-
-def format_pct(chars: int, total: int) -> str:
-    """Format as percentage."""
+def format_pct(part: int, total: int) -> str:
+    """Formats percentage as integer string."""
     if total == 0:
         return "0%"
-    return f"{(chars / total) * 100:.0f}%"
+    return f"{int((part / total) * 100)}%"
 
-
-def render_bar(chars: int, total: int, width: int = 30) -> str:
-    """Render a proportional bar."""
+def draw_bar(label: str, value: int, total: int, width: int = 40, suffix: str = "") -> str:
+    """Draws an ASCII bar chart line."""
     if total == 0:
-        return ""
-    filled = int((chars / total) * width)
-    return "█" * filled + "░" * (width - filled)
+        filled_len = 0
+        pct_str = "0%"
+    else:
+        pct = value / total
+        filled_len = int(width * pct)
+        pct_str = f"{int(pct * 100)}%"
+    
+    bar = "█" * filled_len + "░" * (width - filled_len)
+    val_fmt = format_chars(value)
+    return f"{label:<25} {bar} {val_fmt:>6} ({pct_str:>3}){suffix}"
 
+# --- Visualization Logic ---
 
-def render_grid(segments: list[tuple[str, int]], total: int, grid_size: int = 100) -> list[str]:
-    """Render a grid of symbols representing proportions.
+def print_header(context: ContextMap):
+    """Prints the provenance header."""
+    prov = context.provenance
+    
+    # Calculate duration in seconds
+    duration_str = "N/A"
+    if prov.duration_ms is not None:
+        duration_str = f"{prov.duration_ms / 1000:.2f}s"
 
-    Args:
-        segments: List of (symbol, char_count) tuples
-        total: Total chars for calculating proportions
-        grid_size: Total cells in the grid (default 100 = 10x10)
+    # Format timestamp
+    try:
+        dt = datetime.fromisoformat(prov.timestamp_utc.replace('Z', '+00:00'))
+        ts_str = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except ValueError:
+        ts_str = prov.timestamp_utc
 
-    Returns:
-        List of strings, each representing one row of the grid
-    """
-    # Calculate cells per segment
-    cells = []
-    for sym, chars in segments:
-        count = round((chars / total) * grid_size) if total > 0 else 0
-        cells.extend([sym] * count)
+    print(f"\nCONTEXT MAP REPORT")
+    print(f"==================")
+    print(f"Model:       {prov.model} ({prov.provider})")
+    print(f"Prompt File: {prov.prompt_file}")
+    print(f"Timestamp:   {ts_str}")
+    print(f"Duration:    {duration_str}")
+    if prov.pdd_version:
+        print(f"PDD Version: {prov.pdd_version}")
+    print(f"Total Input: {format_chars(context.input.total_chars)} chars")
+    print("")
 
-    # Pad or trim to exact grid size
-    while len(cells) < grid_size:
-        cells.append(SYM_EMPTY)
-    cells = cells[:grid_size]
+def render_summary_grid(context: ContextMap):
+    """Renders the 10x10 summary grid."""
+    inp = context.input
+    total = inp.total_chars
+    
+    if total == 0:
+        print("No input data to visualize.")
+        return
 
-    # Split into rows of 10
-    rows = []
-    for i in range(0, grid_size, 10):
-        rows.append(" ".join(cells[i:i + 10]))
-    return rows
+    # Extract components safely using model defaults
+    pb = inp.prompt_breakdown
+    
+    # Define categories with (Symbol, Label, Count)
+    # Order: PDD system → devunit → includes → web → shell → variables → few-shot → prepend/append
+    
+    # 1. PDD System Prompt
+    pdd_sys = pb.pdd_system_prompt_chars if pb else 0
+    
+    # 2. Devunit Prompt
+    dev_prompt = pb.devunit_prompt_chars if pb else 0
+    
+    # 3-6. Preprocessor items
+    inc_chars = pb.preprocessor_summary.include_chars if pb and pb.preprocessor_summary else 0
+    web_chars = pb.preprocessor_summary.web_chars if pb and pb.preprocessor_summary else 0
+    shell_chars = pb.preprocessor_summary.shell_chars if pb and pb.preprocessor_summary else 0
+    var_chars = pb.preprocessor_summary.variable_chars if pb and pb.preprocessor_summary else 0
+    
+    # 7. Few Shot
+    few_shot = pb.few_shot_total_chars if pb else 0
+    
+    # 8. Prepend/Append
+    prep_app = (pb.prepended_chars + pb.appended_chars) if pb else 0
 
-
-def render_summary(context: dict[str, Any]) -> str:
-    """Render a compact grid-based summary visualization."""
-    lines = []
-
-    prov = context.get("provenance", {})
-    inp = context.get("input", {})
-    out = context.get("output", {})
-    breakdown = inp.get("prompt_breakdown", {})
-    summary = breakdown.get("preprocessor_summary", {})
-
-    total_input = inp.get("total_chars", 0)
-    total = total_input  # Summary view only shows input breakdown
-
-    # Calculate segment sizes
-    pdd_system_chars = breakdown.get("pdd_system_prompt_chars", 0)
-    devunit_chars = breakdown.get("devunit_prompt_chars", 0)
-    prepended = breakdown.get("prepended_chars", 0)
-    appended = breakdown.get("appended_chars", 0)
-    prepend_append_total = prepended + appended
-    include_chars = summary.get("include_chars", 0)
-    shell_chars = summary.get("shell_chars", 0)
-    web_chars = summary.get("web_chars", 0)
-    variable_chars = summary.get("variable_chars", 0)
-    few_shot_chars = breakdown.get("few_shot_total_chars", 0)
-
-    # Build segments for grid (symbol, chars)
-    # Order: PDD system, devunit, includes, web, shell, variables, few-shot, prepend/append
-    segments = [
-        ("▣", pdd_system_chars),    # PDD system prompt
-        ("◆", devunit_chars),       # Devunit prompt (bare)
-        ("█", include_chars),       # Disk file includes
-        ("▓", web_chars),           # Web includes
-        ("⌘", shell_chars),         # Shell includes
-        ("•", variable_chars),      # Variable substitutions
-        ("◇", few_shot_chars),      # Few-shot examples
-        ("▤", prepend_append_total),# Prepend/append (PDD system)
+    # Calculate "Other/Unaccounted" to ensure grid fills 100 cells if math is slightly off due to structure
+    # or if there are chars in api_structure not captured in breakdown
+    known_sum = pdd_sys + dev_prompt + inc_chars + web_chars + shell_chars + var_chars + few_shot + prep_app
+    remainder = max(0, total - known_sum)
+    
+    categories: List[Tuple[str, str, int]] = [
+        ("▣", "PDD System Prompt", pdd_sys),
+        ("◆", "Devunit Prompt", dev_prompt),
+        ("█", "Disk Includes", inc_chars),
+        ("▓", "Web Includes", web_chars),
+        ("⌘", "Shell Output", shell_chars),
+        ("•", "Variables", var_chars),
+        ("◇", "Few-Shot Examples", few_shot),
+        ("▤", "Prepend/Append", prep_app),
     ]
+    
+    if remainder > 0:
+        categories.append(("?", "Other/Structure", remainder))
 
-    grid_rows = render_grid(segments, total)
+    # Calculate grid cells (total 100)
+    grid_cells = []
+    cells_remaining = 100
+    
+    # First pass: floor division
+    counts = []
+    for sym, label, count in categories:
+        num_cells = math.floor((count / total) * 100)
+        counts.append({"sym": sym, "label": label, "count": count, "cells": num_cells, "raw_frac": (count/total)*100})
+        cells_remaining -= num_cells
+    
+    # Second pass: distribute remaining cells to largest fractional remainders
+    counts.sort(key=lambda x: x["raw_frac"] - x["cells"], reverse=True)
+    for i in range(cells_remaining):
+        counts[i]["cells"] += 1
+        
+    # Restore original order for legend/drawing
+    # We need to map back to the original order. 
+    # Since the list is small, we can just rebuild the grid string based on the original categories list
+    # and look up the cell count from the sorted 'counts' list.
+    
+    final_grid_str = ""
+    legend_data = []
+    
+    for cat in categories:
+        sym, label, count = cat
+        # Find the calculated cell count
+        cell_data = next(c for c in counts if c["label"] == label)
+        num_cells = cell_data["cells"]
+        final_grid_str += sym * num_cells
+        legend_data.append((sym, label, count))
 
-    # Header
-    lines.append("PDD CONTEXT MAP")
-    lines.append(f"{prov.get('prompt_file', 'unknown')} · {format_chars(total_input)} total input")
-    lines.append("")
+    # Print Grid (10 chars wide)
+    print("Input Composition (1 cell ≈ 1%)")
+    print("┌──────────┐")
+    for i in range(0, 100, 10):
+        row = final_grid_str[i:i+10]
+        # Pad if short (shouldn't happen with logic above, but for safety)
+        print(f"│{row:<10}│")
+    print("└──────────┘")
+    
+    print("\nLegend:")
+    for sym, label, count in legend_data:
+        if count > 0:
+            print(f" {sym} {label:<20} {format_chars(count):>6} ({format_pct(count, total)})")
 
-    # Build legend entries (matching grid order)
-    few_shot_count = len(breakdown.get("few_shot_examples", []))
-    legend = [
-        f"▣ PDD system: {format_chars(pdd_system_chars)} ({format_pct(pdd_system_chars, total)})" if pdd_system_chars else None,
-        f"◆ Devunit: {format_chars(devunit_chars)} ({format_pct(devunit_chars, total)})" if devunit_chars else None,
-        f"█ Includes: {format_chars(include_chars)} ({format_pct(include_chars, total)})" if include_chars else None,
-        f"▓ Web: {format_chars(web_chars)} ({format_pct(web_chars, total)})" if web_chars else None,
-        f"⌘ Shell: {format_chars(shell_chars)} ({format_pct(shell_chars, total)})" if shell_chars else None,
-        f"• Variables: {format_chars(variable_chars)} ({format_pct(variable_chars, total)})" if variable_chars else None,
-        f"◇ Few-shot: {few_shot_count}x {format_chars(few_shot_chars)} ({format_pct(few_shot_chars, total)})" if few_shot_chars else None,
-        f"▤ Prepend/append: {format_chars(prepend_append_total)} ({format_pct(prepend_append_total, total)})" if prepend_append_total else None,
-    ]
-    legend = [l for l in legend if l is not None]
+def render_detailed_view(context: ContextMap):
+    """Renders the detailed bar chart breakdown."""
+    inp = context.input
+    out = context.output
+    
+    # 1. Input / Output Overview
+    print("INPUT / OUTPUT OVERVIEW")
+    print("-" * 60)
+    total_io = inp.total_chars + out.response_chars
+    print(draw_bar("Input Chars", inp.total_chars, total_io))
+    print(draw_bar("Output Chars", out.response_chars, total_io))
+    print("")
 
-    # Combine grid and legend side by side
-    for i, row in enumerate(grid_rows):
-        if i < len(legend):
-            lines.append(f"{row}   {legend[i]}")
-        else:
-            lines.append(row)
+    # 2. Tokens (if available)
+    if out.prompt_tokens_reported or out.response_tokens_reported:
+        print("TOKENS (Reported by Provider)")
+        print("-" * 60)
+        p_tok = out.prompt_tokens_reported or 0
+        r_tok = out.response_tokens_reported or 0
+        total_tok = p_tok + r_tok
+        print(draw_bar("Prompt Tokens", p_tok, total_tok))
+        print(draw_bar("Response Tokens", r_tok, total_tok))
+        if out.response_tokens_estimated:
+             print(f" (Estimated Response: {out.response_tokens_estimated})")
+        print("")
 
-    lines.append("")
-    lines.append(f"Duration: {prov.get('duration_ms', 0)}ms · {prov.get('timestamp_utc', '')}")
+    # 3. API Structure
+    if inp.api_structure:
+        api = inp.api_structure
+        print("API STRUCTURE")
+        print("-" * 60)
+        # Total for API structure might differ slightly from total_chars due to overhead, use sum of parts
+        api_total = api.system_prompt_chars + api.user_message_chars + api.assistant_prefill_chars + api.other_chars
+        if api_total > 0:
+            print(draw_bar("System Prompt", api.system_prompt_chars, api_total))
+            print(draw_bar("User Message", api.user_message_chars, api_total))
+            if api.assistant_prefill_chars > 0:
+                print(draw_bar("Assistant Prefill", api.assistant_prefill_chars, api_total))
+            if api.other_chars > 0:
+                print(draw_bar("Other/Overhead", api.other_chars, api_total))
+        print("")
 
-    return "\n".join(lines)
+    # 4. Prompt Breakdown
+    if inp.prompt_breakdown:
+        pb = inp.prompt_breakdown
+        print("PROMPT BREAKDOWN")
+        print("-" * 60)
+        # Base components relative to total input
+        print(draw_bar("PDD System Prompt", pb.pdd_system_prompt_chars, inp.total_chars))
+        print(draw_bar("Devunit Prompt", pb.devunit_prompt_chars, inp.total_chars))
+        print(draw_bar("Prepend/Append", pb.prepended_chars + pb.appended_chars, inp.total_chars))
+        print(draw_bar("Preprocessor Total", pb.preprocessor_total_chars, inp.total_chars))
+        print(draw_bar("Few-Shot Total", pb.few_shot_total_chars, inp.total_chars))
+        print("")
 
+        # 5. Preprocessor Details
+        if pb.preprocessor_summary:
+            ps = pb.preprocessor_summary
+            print("PREPROCESSOR CONTENT")
+            print("-" * 60)
+            # Calculate total preprocessor chars for relative bars
+            pp_total = ps.include_chars + ps.shell_chars + ps.web_chars + ps.variable_chars
+            
+            if pp_total > 0:
+                print(draw_bar("File Includes", ps.include_chars, pp_total, suffix=f" [{ps.include_count} items]"))
+                print(draw_bar("Web Includes", ps.web_chars, pp_total, suffix=f" [{ps.web_count} items]"))
+                print(draw_bar("Shell Output", ps.shell_chars, pp_total, suffix=f" [{ps.shell_count} items]"))
+                print(draw_bar("Variables", ps.variable_chars, pp_total, suffix=f" [{ps.variable_count} items]"))
+            else:
+                print("No preprocessor content.")
+            print("")
 
-def render_detailed(context: dict[str, Any]) -> str:
-    """Render a detailed breakdown with bar charts."""
-    lines = []
-
-    # Header
-    prov = context.get("provenance", {})
-    lines.append("─" * 60)
-    lines.append("PDD CONTEXT MAP")
-    lines.append("─" * 60)
-
-    # Provenance
-    lines.append(f"Prompt:    {prov.get('prompt_file', 'unknown')}")
-    lines.append(f"Model:     {prov.get('model', 'unknown')}")
-    lines.append(f"Provider:  {prov.get('provider', 'unknown')}")
-    lines.append(f"Timestamp: {prov.get('timestamp_utc', 'unknown')}")
-    lines.append(f"Duration:  {prov.get('duration_ms', 0)}ms")
-    lines.append("")
-
-    # Input/Output summary
-    inp = context.get("input", {})
-    out = context.get("output", {})
-    total_input = inp.get("total_chars", 0)
-    total_output = out.get("response_chars", 0)
-    total = total_input + total_output
-
-    # Prompt breakdown
-    breakdown = inp.get("prompt_breakdown", {})
-
-    # PDD system prompt
-    pdd_system_chars = breakdown.get("pdd_system_prompt_chars", 0)
-    if pdd_system_chars:
-        lines.append("PDD SYSTEM PROMPT")
-        lines.append(f"  {format_chars(pdd_system_chars)}")
-        lines.append("")
-
-    lines.append("INPUT/OUTPUT")
-    lines.append(f"  Input:  {render_bar(total_input, total)} {format_chars(total_input)}")
-    lines.append(f"  Output: {render_bar(total_output, total)} {format_chars(total_output)}")
-    lines.append("")
-
-    # Token counts (if available)
-    prompt_tokens = out.get("prompt_tokens_reported")
-    response_tokens_reported = out.get("response_tokens_reported")
-    response_tokens_estimated = out.get("response_tokens_estimated")
-    if prompt_tokens or response_tokens_reported:
-        lines.append("TOKENS (from provider)")
-        if prompt_tokens:
-            lines.append(f"  Prompt tokens:   {prompt_tokens:,}")
-        if response_tokens_reported:
-            lines.append(f"  Response tokens: {response_tokens_reported:,}")
-        if response_tokens_estimated:
-            lines.append(f"  Response (est):  {response_tokens_estimated:,}")
-        lines.append("")
-
-    # API structure breakdown
-    api = inp.get("api_structure", {})
-    if api:
-        lines.append("API STRUCTURE")
-        for key in ["system_prompt_chars", "user_message_chars", "assistant_prefill_chars", "other_chars"]:
-            chars = api.get(key, 0)
-            if chars > 0:
-                label = key.replace("_chars", "").replace("_", " ").title()
-                lines.append(f"  {label:20} {render_bar(chars, total_input, 25)} {format_chars(chars)}")
-        lines.append("")
-
-    # Prompt breakdown
-    if breakdown:
-        lines.append("PROMPT BREAKDOWN")
-        devunit = breakdown.get("devunit_prompt_chars", 0)
-        prepended = breakdown.get("prepended_chars", 0)
-        appended = breakdown.get("appended_chars", 0)
-        preproc = breakdown.get("preprocessor_total_chars", 0)
-        prompt_total = devunit + prepended + appended + preproc
-
-        lines.append(f"  {'Devunit prompt':20} {render_bar(devunit, prompt_total, 25)} {format_chars(devunit)}")
-        if prepended:
-            lines.append(f"  {'Prepended':20} {render_bar(prepended, prompt_total, 25)} {format_chars(prepended)}")
-        if appended:
-            lines.append(f"  {'Appended':20} {render_bar(appended, prompt_total, 25)} {format_chars(appended)}")
-        lines.append(f"  {'Preprocessor':20} {render_bar(preproc, prompt_total, 25)} {format_chars(preproc)}")
-        lines.append("")
-
-    # Preprocessor summary by type
-    summary = breakdown.get("preprocessor_summary", {})
-    if summary:
-        lines.append("PREPROCESSOR")
-        preproc_total = breakdown.get("preprocessor_total_chars", 1)
-        type_order = ["include", "shell", "web", "variable"]
-        for t in type_order:
-            count = summary.get(f"{t}_count", 0)
-            chars = summary.get(f"{t}_chars", 0)
-            if count > 0:
-                lines.append(f"  {t.title():12} {render_bar(chars, preproc_total, 20)} {count:2}x {format_chars(chars):>8}")
-        lines.append("")
-
-    # Few-shot examples
-    few_shot = breakdown.get("few_shot_examples", [])
-    if few_shot:
-        few_shot_total = breakdown.get("few_shot_total_chars", 1)
-        lines.append("FEW-SHOT EXAMPLES")
-        for ex in few_shot:
-            example_id = ex.get("example_id", "unknown")[:8]  # Show first 8 chars of UUID
-            chars = ex.get("chars", 0)
-            pinned = "📌" if ex.get("pinned", False) else "  "
-            quality = ex.get("quality_score")
-            quality_str = f"q={quality:.2f}" if quality is not None else ""
-            lines.append(f"  {pinned} {example_id}...  {render_bar(chars, few_shot_total, 15)} {format_chars(chars):>6} {quality_str}")
-        lines.append(f"     {'Total':12} {' ' * 15} {format_chars(few_shot_total):>6}")
-        lines.append("")
-
-    lines.append("─" * 60)
-    return "\n".join(lines)
-
+        # 6. Few Shot Details
+        if pb.few_shot_examples:
+            print("FEW-SHOT EXAMPLES")
+            print("-" * 60)
+            # Sort by chars descending
+            sorted_examples = sorted(pb.few_shot_examples, key=lambda x: x.chars, reverse=True)
+            
+            print(f"{'ID':<30} {'Size':<10} {'Pinned':<8} {'Score'}")
+            print(f"{'-'*30} {'-'*10} {'-'*8} {'-'*5}")
+            
+            for ex in sorted_examples:
+                pinned_mark = "YES" if ex.pinned else "-"
+                score_str = f"{ex.quality_score:.2f}" if ex.quality_score is not None else "-"
+                print(f"{ex.example_id[:28]:<30} {format_chars(ex.chars):<10} {pinned_mark:<8} {score_str}")
+            print("")
 
 def main():
-    """CLI entry point."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Visualize PDD context maps")
-    parser.add_argument("file", nargs="?", help="JSON context map file (or stdin)")
-    parser.add_argument("--detailed", action="store_true", help="Show detailed breakdown instead of summary")
+    parser = argparse.ArgumentParser(description="Visualize PDD context map JSON files.")
+    parser.add_argument("file", nargs="?", help="JSON context map file (reads stdin if omitted)")
+    parser.add_argument("--detailed", action="store_true", help="Show detailed breakdown instead of summary grid")
+    
     args = parser.parse_args()
 
-    if args.file:
-        with open(args.file) as f:
-            context = json.load(f)
-    else:
-        context = json.load(sys.stdin)
+    # Load Data
+    try:
+        if args.file:
+            context = ContextMap.from_file(args.file)
+        else:
+            if sys.stdin.isatty():
+                parser.print_help()
+                sys.exit(1)
+            context = ContextMap.from_json(sys.stdin.read())
+    except Exception as e:
+        print(f"Error loading context map: {e}", file=sys.stderr)
+        sys.exit(1)
 
+    # Render
+    print_header(context)
+    
     if args.detailed:
-        print(render_detailed(context))
+        render_detailed_view(context)
     else:
-        print(render_summary(context))
-
+        render_summary_grid(context)
 
 if __name__ == "__main__":
     main()

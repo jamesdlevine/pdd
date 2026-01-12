@@ -1,0 +1,86 @@
+<pdd>
+Target: pdd/context_map_models.py (NEW FILE)
+
+Generate:
+  pdd generate context_map_models --language python
+</pdd>
+
+Pydantic models for the PDD Context Map schema.
+
+These models serve as the single source of truth for context map data structures.
+All Python code that reads or writes context map data must use these models.
+
+% Schema Definition
+
+The models must be strictly compliant with this JSON schema:
+
+```context_map.schema.json```
+
+% Requirements
+
+1. Define Pydantic models matching every type in the JSON schema
+2. Use appropriate Pydantic field constraints (ge, le, pattern, etc.)
+3. Support serialization to/from JSON and dict
+4. Provide a `generate_sample()` class method on the root model that returns a realistic example
+5. All models must use `model_config = {"extra": "forbid"}` to reject unknown fields
+6. Export SCHEMA_VERSION constant matching the schema
+
+% Model Hierarchy
+
+Root model: `ContextMap`
+  - schema_version: str (pattern: ^\d+\.\d+$)
+  - generation_id: str (UUID format)
+  - provenance: Provenance
+  - input: Input
+  - output: Output
+
+Nested models (match schema $defs EXACTLY - field names must match JSON):
+  - Provenance: timestamp_utc, model, provider, prompt_file, duration_ms?, pdd_version?
+  - Input: total_chars, api_structure?, prompt_breakdown?
+  - Output: response_chars, response_tokens_reported?, response_tokens_estimated?, prompt_tokens_reported?
+  - ApiStructure: system_prompt_chars, user_message_chars, assistant_prefill_chars, other_chars
+  - PromptBreakdown fields (EXACT names):
+      pdd_system_prompt_chars, devunit_prompt_chars, prepended_chars, appended_chars,
+      preprocessor_total_chars, preprocessor_items (list), preprocessor_summary,
+      preprocessor_summary_extra?, few_shot_examples (list), few_shot_total_chars
+  - PreprocessorItem fields (EXACT names):
+      type (enum), chars, line_in_prompt?,
+      syntax? (for include), source? (for include), include_many? (for include),
+      command? (for shell), url? (for web), name? (for variable)
+  - PreprocessorSummary: include_count, include_chars, shell_count, shell_chars, web_count, web_chars, variable_count, variable_chars
+  - PreprocessorSummaryExtra: include_many_count, include_many_chars
+  - FewShotExample: example_id, chars, pinned?, quality_score?
+
+% Enums
+
+Define string enums for constrained values:
+  - PreprocessorType: "include", "shell", "web", "variable"
+  - IncludeSyntax: "directive", "backticks"
+
+% Convenience Methods on ContextMap
+
+- `to_json(indent=2) -> str`: Serialize to JSON, excluding None values
+- `to_dict() -> dict`: Serialize to dict, excluding None values
+- `from_json(json_str) -> ContextMap`: Parse from JSON string
+- `from_dict(data) -> ContextMap`: Parse from dict
+- `from_file(path) -> ContextMap`: Load from JSON file
+- `save(path) -> None`: Write to JSON file
+- `generate_sample() -> ContextMap`: Create realistic sample data
+
+% Sample Data for generate_sample()
+
+The sample should include:
+- All required fields populated
+- Representative preprocessor_items (2 includes, 1 shell, 1 web, 1 variable)
+- Two few_shot_examples (one pinned, one not)
+- Realistic character counts that sum correctly
+- A valid UUID for generation_id
+- Current timestamp for timestamp_utc
+
+% Implementation Notes
+
+- Use `from __future__ import annotations` for forward references
+- Import from pydantic: BaseModel, Field, field_validator (if needed)
+- Use Optional[] for optional fields with None default
+- Use List[] for array fields with default_factory=list
+- Default integer fields to 0 where schema allows

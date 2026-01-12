@@ -1,69 +1,53 @@
 <pdd>
 Target: pdd/code_generator.py
 
-Prerequisites (run from ~/pdd):
-  # Generate prompt from existing code if it doesn't exist
-  pdd update pdd/code_generator.py --output prompts/code_generator_python.prompt
-
-Apply change (run from ~/pdd):
-  pdd change \
-    ~/pdd_context_viz/changes/03_code_generator_instrumentation.change.prompt \
-    pdd/code_generator.py \
-    prompts/code_generator_python.prompt \
+Apply (from ~/pdd):
+  pdd change ~/pdd_context_viz/changes/03_code_generator_instrumentation.change.prompt \
+    pdd/code_generator.py prompts/code_generator_python.prompt \
     --output prompts/code_generator_python.prompt
-
-Regenerate code:
-  pdd generate code_generator --language python
 </pdd>
 
-Ensure the return value from `llm_invoke()` passes through the extended fields (tokens, duration).
+% Context Map Feature - Code Generator Extended Return
 
-Note: Most instrumentation happens in `code_generator_main.py` (see 03b), because:
-- Preprocessing happens there before calling this function
-- Cloud execution bypasses this function entirely
+Pass through the extended return fields from `llm_invoke` to callers.
 
-% Changes Required
+% Current State
 
-The `code_generator` function calls `llm_invoke()` which now returns extended fields. Ensure these are captured and returned.
+The `code_generator` function currently returns `Tuple[str, float, str]`:
+- `runnable_code`: The generated code string
+- `total_cost`: Cost of all LLM calls
+- `model_name`: The model used
 
-1. Capture the full response dict from llm_invoke:
-   ```python
-   response = llm_invoke(...)
-   generated_code = response['result']
-   cost = response['cost']
-   model_name = response['model_name']
-   # Extended fields now available:
-   # response.get('input_tokens'), response.get('output_tokens'),
-   # response.get('duration_ms'), response.get('provider')
-   ```
+The `llm_invoke` function now returns additional fields: `input_tokens`, `output_tokens`, `duration_ms`, `provider`.
 
-2. If adding a context_sampler parameter, use it to record metrics:
-   ```python
-   def code_generator(
-       prompt: str,
-       language: str,
-       strength: float,
-       temperature: float = 0.0,
-       time: Optional[float] = None,
-       verbose: bool = False,
-       preprocess_prompt: bool = True,
-       output_schema: Optional[dict] = None,
-       context_sampler: Optional['ContextSampler'] = None,
-   ) -> Tuple[str, float, str]:
-   ```
+% Required Changes
 
-3. After llm_invoke returns, optionally record:
-   ```python
-   if context_sampler:
-       context_sampler.record_call(
-           input_chars=len(processed_prompt),
-           output_chars=len(response['result']),
-           duration_ms=response.get('duration_ms', 0),
-           prompt_tokens_reported=response.get('input_tokens'),
-           response_tokens_reported=response.get('output_tokens'),
-       )
-   ```
+Change the return type to a dictionary that includes both the original fields and new metrics:
+
+```python
+def code_generator(...) -> Dict[str, Any]:
+    """
+    Returns:
+        Dictionary with keys:
+        - 'runnable_code': str
+        - 'total_cost': float
+        - 'model_name': str
+        - 'input_tokens': int (accumulated across calls)
+        - 'output_tokens': int (accumulated across calls)
+        - 'duration_ms': int (accumulated across calls)
+        - 'provider': str
+    """
+```
+
+% Implementation Notes
+
+- Accumulate token counts across multiple LLM calls (initial generation + continuation if needed)
+- Accumulate duration across all calls
+- Provider comes from the first/main LLM call
+- Default tokens to 0 if not available from response
 
 % Backward Compatibility
 
-When `context_sampler` is None (default), behavior is unchanged. The function still returns `Tuple[str, float, str]`.
+Callers that currently unpack the tuple like `code, cost, model = code_generator(...)` will need updating. However, this is an internal function primarily called by `code_generator_main`, which is also being modified.
+
+Alternatively, to maintain strict backward compatibility, add a `return_dict=False` parameter that controls the return format.
