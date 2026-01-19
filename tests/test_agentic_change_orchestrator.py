@@ -605,3 +605,201 @@ def test_step9_prompt_template_includes_step5_output():
 
     assert "{step5_output}" in template_content, \
         "Step 9 template must include {step5_output} to receive documentation changes from Step 5"
+
+
+# -----------------------------------------------------------------------------
+# Curly Brace / JSON Handling Tests (Issue #319)
+# -----------------------------------------------------------------------------
+
+def test_format_with_json_curly_braces_causes_keyerror():
+    """
+    Documents the exact bug pattern: str.format() interprets JSON braces as placeholders.
+
+    When a string containing JSON like '{"type": "test"}' is passed through str.format(),
+    Python interprets the curly braces as format placeholders and raises KeyError.
+
+    This test documents the failure mode - it passes by demonstrating the error.
+    """
+    json_content = '{\n  "type": "test"\n}'
+    template = "Issue content: {issue_content}"
+
+    # This shows why the bug occurs - str.format will fail if JSON is in the template itself
+    bad_template = f"Issue content: {json_content}"
+
+    with pytest.raises(KeyError) as exc_info:
+        bad_template.format()  # No placeholders needed - the JSON itself causes the error
+
+    # The error shows Python trying to interpret the JSON key as a placeholder
+    assert "type" in str(exc_info.value)
+
+
+def test_escape_braces_in_template():
+    """
+    Test that properly escaped braces are not interpreted as format placeholders.
+
+    This demonstrates the fix: doubling curly braces escapes them in str.format().
+    """
+    # When braces are properly escaped (doubled), str.format() treats them as literal braces
+    escaped_json = '{{\n  "type": "test"\n}}'
+    template_with_escaped = f"Issue content: {escaped_json}"
+
+    # This should NOT raise - escaped braces are treated as literals
+    result = template_with_escaped.format()
+
+    # Result should have single braces (escaped braces become single)
+    assert '{\n  "type": "test"\n}' in result
+
+
+def test_orchestrator_handles_json_in_issue_content(mock_dependencies, temp_cwd):
+    """
+    Test that the orchestrator can handle JSON content in the issue body.
+
+    Bug scenario (Issue #319): When the GitHub issue contains JSON code blocks,
+    the curly braces cause str.format() to fail with KeyError.
+
+    This test requires the template's format() to actually be called with the real
+    context values, not a mock that ignores them.
+
+    This test FAILS on buggy code and PASSES once the fix is applied.
+    """
+    mock_run, mock_load, _, _ = mock_dependencies
+
+    # Issue content with JSON that contains curly braces
+    json_issue_content = '''
+    The user reported this error:
+    ```json
+    {
+      "type": "error",
+      "message": "Connection failed",
+      "code": 500
+    }
+    ```
+    Please fix this bug.
+    '''
+
+    # Create a realistic template that has actual placeholders
+    # When the template is formatted, if issue_content contains unescaped braces,
+    # and those braces are somehow incorporated into the template BEFORE format(),
+    # it would cause a KeyError
+    realistic_template = "Issue: {issue_content}\nURL: {issue_url}"
+
+    # Make load_prompt_template return the realistic template string
+    # so format(**context) is actually called on it
+    mock_load.return_value = realistic_template
+
+    # Configure mock to return success for all steps
+    def side_effect_run(**kwargs):
+        label = kwargs.get("label", "")
+        if label == "step9":
+            return (True, "FILES_MODIFIED: fix.py", 0.1, "gpt-4")
+        if label.startswith("step10"):
+            return (True, "No Issues Found", 0.1, "gpt-4")
+        if label == "step12":
+            return (True, "PR Created: https://github.com/owner/repo/pull/1", 0.1, "gpt-4")
+        return (True, f"Output for {label}", 0.1, "gpt-4")
+
+    mock_run.side_effect = side_effect_run
+
+    # The orchestrator should handle JSON in issue content without KeyError
+    success, msg, cost, model, files = run_agentic_change_orchestrator(
+        issue_url="http://url",
+        issue_content=json_issue_content,  # Contains JSON with curly braces
+        repo_owner="owner",
+        repo_name="repo",
+        issue_number=319,
+        issue_author="user",
+        issue_title="Bug with JSON",
+        cwd=temp_cwd,
+        quiet=True
+    )
+
+    # If the bug exists, this will fail with:
+    # "Context missing key for step 1: 'type'" or similar
+    assert "Context missing key" not in msg, f"Bug detected: {msg}"
+    assert success is True, f"Orchestrator failed: {msg}"
+
+
+def test_orchestrator_handles_curly_braces_in_step_outputs(mock_dependencies, temp_cwd):
+    """
+    Test that the orchestrator handles curly braces in step outputs.
+
+    Bug scenario: When a step returns output containing JSON/curly braces,
+    subsequent steps may fail because str.format() interprets those braces.
+
+    This test uses a realistic template with {step4_output} placeholder to
+    verify the context substitution works even when step outputs contain JSON.
+
+    This test FAILS on buggy code and PASSES once the fix is applied.
+    """
+    mock_run, _, mock_subprocess, _ = mock_dependencies
+
+    call_count = 0
+
+    def side_effect_run(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        label = kwargs.get("label", "")
+
+        # Step 4 returns JSON-containing output (like a code analysis result)
+        if label == "step4":
+            return (True, '''Analysis complete. Found configuration:
+```json
+{
+  "feature": "dark_mode",
+  "enabled": true
+}
+```
+Requirements are clear.''', 0.1, "gpt-4")
+
+        if label == "step9":
+            return (True, "FILES_MODIFIED: config.py", 0.1, "gpt-4")
+        if label.startswith("step10"):
+            return (True, "No Issues Found", 0.1, "gpt-4")
+        if label == "step12":
+            return (True, "PR Created: https://github.com/owner/repo/pull/2", 0.1, "gpt-4")
+        return (True, f"Output for {label}", 0.1, "gpt-4")
+
+    mock_run.side_effect = side_effect_run
+
+    # Use realistic templates that include step output placeholders
+    # The step 5+ templates reference {step4_output} etc.
+    templates = {
+        "agentic_change_step1_duplicate_LLM": "Check issue: {issue_content}",
+        "agentic_change_step2_docs_LLM": "Check docs for: {issue_content}",
+        "agentic_change_step3_research_LLM": "Research: {issue_content}",
+        "agentic_change_step4_clarify_LLM": "Clarify: {issue_content}",
+        "agentic_change_step5_docs_change_LLM": "Docs for: {issue_content}\nStep4: {step4_output}",
+        "agentic_change_step6_devunits_LLM": "Dev units: {step4_output}\n{step5_output}",
+        "agentic_change_step7_architecture_LLM": "Arch: {step5_output}",
+        "agentic_change_step8_analyze_LLM": "Analyze: {step6_output}",
+        "agentic_change_step9_implement_LLM": "Implement: {step8_output}",
+        "agentic_change_step10_identify_issues_LLM": "Review: {step9_output}",
+        "agentic_change_step11_fix_issues_LLM": "Fix: {step10_output}",
+        "agentic_change_step12_create_pr_LLM": "Create PR: {step9_output}",
+    }
+
+    def mock_load_template(name):
+        return templates.get(name, "Default: {issue_content}")
+
+    with patch("pdd.agentic_change_orchestrator.load_prompt_template") as mock_load:
+        mock_load.side_effect = mock_load_template
+
+        success, msg, cost, model, files = run_agentic_change_orchestrator(
+            issue_url="http://url",
+            issue_content="Add dark mode feature",
+            repo_owner="owner",
+            repo_name="repo",
+            issue_number=320,
+            issue_author="user",
+            issue_title="Add dark mode",
+            cwd=temp_cwd,
+            quiet=True
+        )
+
+    # If the bug exists, step 5+ will fail trying to format step4_output's JSON
+    assert "Context missing key" not in msg, f"Bug detected: {msg}"
+    assert success is True, f"Orchestrator failed: {msg}"
+
+    # Verify we actually got past step 4 (steps 5-12 should have been called)
+    labels_called = [call.kwargs.get('label') for call in mock_run.call_args_list]
+    assert "step5" in labels_called, "Step 5 was never called - test may not be exercising the bug path"
